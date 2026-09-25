@@ -2,15 +2,16 @@
 # tools/verify_proof.sh
 # Verification harness for Role D (Direct Proof Executor):
 # 1. Enforces pinned Lake environment (lean-toolchain, lakefile.toml, lake-manifest.json).
-# 2. Scans executor code for escape tokens (sorry, admit, native_decide, axiom).
+# 2. Scans executor code for escape tokens (sorry, admit, native_decide, axiom) and trust-core intrusion.
 # 3. Wraps candidate code in `namespace CandidateExecutor ... end CandidateExecutor`.
 # 4. Invokes Lean 4 meta-checker (tools/VerifyTarget.lean) to verify:
-#    - Lean-native declaration enumeration (theorems, lemmas, defs, noncomputable, private)
+#    - Module-provenance candidate declaration enumeration (env.getModuleIdxFor? = none)
+#    - Immune to _root_, namespace exit, private, or Unicode identifier tricks
 #    - Exact definitional match between executor_theorem and frozen_target
 #    - Strict kernel axiom audit (A_observed ⊆ {propext, Classical.choice, Quot.sound})
 #    - Machine-readable Method Mode Deny-List enforcement (prefix and exact match)
 # 5. Enforces exit code 0 and exact sentinel: VERIFICATION_SUCCESS.
-# Part of representation-lifting-s1 experimental protocol (v0.7).
+# Part of representation-lifting-s1 experimental protocol (v0.8).
 
 set -euo pipefail
 
@@ -34,10 +35,15 @@ if [ ! -f "$PROJECT_ROOT/lean-toolchain" ] || [ ! -f "$PROJECT_ROOT/lakefile.tom
     exit 2
 fi
 
-# 2. Fail-closed scan for unproved escape hatches in executor code
+# 2. Fail-closed scan for unproved escape hatches and trust core spoofing in executor code
 FORBIDDEN_PATTERN='(^|[^[:alnum:]_`])(sorry|admit)([^[:alnum:]_`]|$)|native_decide|^[[:space:]]*axiom([[:space:]]|$)'
 if grep -En "$FORBIDDEN_PATTERN" "$EXECUTOR_LEAN_FILE" >/dev/null 2>&1; then
     echo "FAIL_CLOSED: Forbidden escape token detected in $EXECUTOR_LEAN_FILE" >&2
+    exit 1
+fi
+
+if grep -E '\bVerifierTrustCore\b' "$EXECUTOR_LEAN_FILE" >/dev/null 2>&1; then
+    echo "FAIL_CLOSED: Forbidden attempt to access or modify VerifierTrustCore in $EXECUTOR_LEAN_FILE" >&2
     exit 1
 fi
 
@@ -100,7 +106,7 @@ echo "namespace CandidateExecutor" >> "$VERIFY_LEAN"
 grep -vE '^\s*import\b' "$EXECUTOR_LEAN_FILE" >> "$VERIFY_LEAN"
 echo "end CandidateExecutor" >> "$VERIFY_LEAN"
 echo "" >> "$VERIFY_LEAN"
-echo "#eval! runVerifyTarget \`frozen_target \`$EXECUTOR_THEOREM $PROHIBITED_LEAN_LIST" >> "$VERIFY_LEAN"
+echo "#eval! VerifierTrustCore.runVerifyTarget \`frozen_target \`$EXECUTOR_THEOREM $PROHIBITED_LEAN_LIST" >> "$VERIFY_LEAN"
 
 # 4. Execute Lean verification strictly via pinned lake env lean
 OUTPUT="$TMP_DIR/verify_output.txt"

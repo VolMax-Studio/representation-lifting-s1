@@ -62,6 +62,24 @@ def test_verify_proof():
         assert "VERIFICATION_SUCCESS" in res_mathlib.stdout
         print("test_verify_proof (Mathlib AddCommGroup target and proof): PASS")
 
+        # 5. Adversarial namespace escape via _root_ (Method Mode Deny-List)
+        t2_target = os.path.join(ROOT_DIR, "calibration", "fibonacci_t2.lean")
+        root_esc = os.path.join(ROOT_DIR, "fixtures", "method_mode", "root_aux_forbidden.lean")
+        adm_fib = os.path.join(ROOT_DIR, "admissibility", "fibonacci.json")
+        res_root = subprocess.run([VERIFY_SCRIPT, t2_target, root_esc, "executor_theorem", adm_fib],
+                                  capture_output=True, text=True)
+        assert res_root.returncode != 0
+        assert "FORBIDDEN_METHOD_MODE_CONSTANT" in res_root.stderr or "FORBIDDEN_METHOD_MODE_CONSTANT" in res_root.stdout
+        print("test_verify_proof (adversarial _root_ Method Mode rejection): PASS")
+
+        # 6. Adversarial namespace escape via explicit end (Method Mode Deny-List)
+        ns_esc = os.path.join(ROOT_DIR, "fixtures", "method_mode", "namespace_escape_forbidden.lean")
+        res_ns = subprocess.run([VERIFY_SCRIPT, t2_target, ns_esc, "executor_theorem", adm_fib],
+                                capture_output=True, text=True)
+        assert res_ns.returncode != 0
+        assert "FORBIDDEN_METHOD_MODE_CONSTANT" in res_ns.stderr or "FORBIDDEN_METHOD_MODE_CONSTANT" in res_ns.stdout
+        print("test_verify_proof (adversarial explicit namespace escape Method Mode rejection): PASS")
+
 if __name__ == "__main__":
     test_verify_proof()
     print("ALL VERIFY PROOF TESTS PASSED.")

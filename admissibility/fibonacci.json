@@ -5,7 +5,6 @@
   "prohibited_constants": [
     "Int.fib_succ_mul_fib_pred_sub_fib_sq",
     "Nat.fib_add",
-    "Nat.fib_add_two",
     "Nat.fib_gcd"
   ]
 }

@@ -2,17 +2,19 @@
 # tools/verify_lifted.sh
 # Verification harness for Role L (Lifted Proof Executor):
 # 1. Enforces pinned Lake environment (lean-toolchain, lakefile.toml, lake-manifest.json).
-# 2. Scans executor code for escape tokens (sorry, admit, native_decide, axiom).
-# 3. Combines frozen representation prefix with executor proof inside namespace CandidateExecutor.
+# 2. Scans executor code for escape tokens (sorry, admit, native_decide, axiom) and trust-core intrusion.
+# 3. Combines frozen representation prefix with executor proof.
 # 4. Invokes tools/VerifyLifted.lean to verify:
+#    - Module-provenance candidate declaration enumeration (env.getModuleIdxFor? = none)
+#    - Immune to _root_, namespace exit, private, or Unicode identifier tricks
 #    - type(preservation_bridge) ≡ BridgeProp
 #    - type(lifted_theorem) ≡ LiftedClaim
 #    - Zero sorryAx and zero custom axioms in both proofs
-#    - Transitive Non-circularity: preservation_bridge ∉ Deps*(lifted_theorem)
-#    - Method Mode deny-list enforcement (exact and prefix) across all candidate declarations
+#    - Transitive Non-circularity across all local declarations: preservation_bridge ∉ Deps*(lifted_theorem)
+#    - Method Mode deny-list enforcement across all candidate declarations
 #    - Actual mechanical synthesis of original executor theorem with kernel axiom audit
 # 5. Enforces exit code 0 and exact sentinel: VERIFY_LIFTED_SENTINEL_OK.
-# Part of representation-lifting-s1 experimental protocol (v0.7).
+# Part of representation-lifting-s1 experimental protocol (v0.8).
 
 set -euo pipefail
 
@@ -35,10 +37,15 @@ if [ ! -f "$PROJECT_ROOT/lean-toolchain" ] || [ ! -f "$PROJECT_ROOT/lakefile.tom
     exit 2
 fi
 
-# 2. Fail-closed scan for unproved escape hatches in executor code
+# 2. Fail-closed scan for unproved escape hatches and trust core spoofing in executor code
 FORBIDDEN_PATTERN='(^|[^[:alnum:]_`])(sorry|admit)([^[:alnum:]_`]|$)|native_decide|^[[:space:]]*axiom([[:space:]]|$)'
 if grep -En "$FORBIDDEN_PATTERN" "$EXECUTOR_LEAN_FILE" >/dev/null 2>&1; then
     echo "FAIL_CLOSED: Forbidden escape token detected in $EXECUTOR_LEAN_FILE" >&2
+    exit 1
+fi
+
+if grep -E '\bVerifierTrustCore\b' "$EXECUTOR_LEAN_FILE" >/dev/null 2>&1; then
+    echo "FAIL_CLOSED: Forbidden attempt to access or modify VerifierTrustCore in $EXECUTOR_LEAN_FILE" >&2
     exit 1
 fi
 
@@ -97,7 +104,7 @@ echo "namespace CandidateExecutor" >> "$VERIFY_LEAN"
 grep -vE '^\s*import\b' "$EXECUTOR_LEAN_FILE" >> "$VERIFY_LEAN"
 echo "end CandidateExecutor" >> "$VERIFY_LEAN"
 echo "" >> "$VERIFY_LEAN"
-echo "#eval! runVerifyLifted \`frozen_target \`BridgeProp \`LiftedClaim \`preservation_bridge \`lifted_theorem $PROHIBITED_LEAN_LIST" >> "$VERIFY_LEAN"
+echo "#eval! VerifierTrustCore.runVerifyLifted \`frozen_target \`BridgeProp \`LiftedClaim \`preservation_bridge \`lifted_theorem $PROHIBITED_LEAN_LIST" >> "$VERIFY_LEAN"
 
 # 4. Execute verification strictly via pinned lake env lean
 OUTPUT="$TMP_DIR/verify_output.txt"

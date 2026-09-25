@@ -58,6 +58,22 @@ def test_verify_lifted():
     assert "CIRCULAR_LIFT_DEPENDENCY" in res3b.stderr or "CIRCULAR_LIFT_DEPENDENCY" in res3b.stdout
     print("test_verify_lifted (transitive circularity guard via helper rejects dependency): PASS")
 
+    # 3c. Adversarial root_aux circular escape
+    root_circ = os.path.join(LIFTED_DIR, "root_aux_circular.lean")
+    res3c = subprocess.run([VERIFY_LIFTED_SCRIPT, target, stub, root_circ],
+                           capture_output=True, text=True)
+    assert res3c.returncode != 0, f"Expected FAIL for root_aux circular escape, got returncode 0"
+    assert "CIRCULAR_LIFT_DEPENDENCY" in res3c.stderr or "CIRCULAR_LIFT_DEPENDENCY" in res3c.stdout
+    print("test_verify_lifted (module-provenance rejects _root_.aux circularity escape): PASS")
+
+    # 3d. Adversarial namespace escape circular
+    ns_circ = os.path.join(LIFTED_DIR, "namespace_escape_circular.lean")
+    res3d = subprocess.run([VERIFY_LIFTED_SCRIPT, target, stub, ns_circ],
+                           capture_output=True, text=True)
+    assert res3d.returncode != 0, f"Expected FAIL for namespace escape circular, got returncode 0"
+    assert "CIRCULAR_LIFT_DEPENDENCY" in res3d.stderr or "CIRCULAR_LIFT_DEPENDENCY" in res3d.stdout
+    print("test_verify_lifted (module-provenance rejects namespace-escape circularity): PASS")
+
     # 4. Dead bridge direct proof cheat (only proves executor_theorem with dummy have)
     dead = os.path.join(LIFTED_DIR, "dead_bridge_direct_proof.lean")
     res4 = subprocess.run([VERIFY_LIFTED_SCRIPT, target, stub, dead],

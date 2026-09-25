@@ -6,14 +6,16 @@ Invokes tools/CheckBridge.lean in the pinned Lake/Lean kernel environment.
 Enforces:
 1. Strict requirement for pinned Lake environment (lean-toolchain, lakefile.toml, lake-manifest.json).
 2. Extraction of top-level imports to the head of the file.
-3. Candidate definitions wrapped in `namespace CandidateExecutor ... end CandidateExecutor`.
-4. Elaboration and pure-kernel axiom audit of ALL candidate declarations (zero sorryAx).
-5. Identity Guard (AND semantics: LiftDom = LiftCod AND liftT = id).
-6. Sequential dependent binder type matching.
-7. Target linkage, LiftedClaim linkage, and constant reference to liftT.
-8. Machine-readable Method Mode deny-list enforcement (prefix and exact match).
-9. Verification of exact sentinel: CHECK_BRIDGE_SENTINEL_OK.
-Part of representation-lifting-s1 experimental protocol (v0.7).
+3. Trust-core intrusion check on candidate code.
+4. Candidate definitions wrapped in `namespace CandidateExecutor ... end CandidateExecutor`.
+5. Module-provenance enumeration of ALL candidate declarations (env.getModuleIdxFor? = none).
+6. Elaboration and pure-kernel axiom audit of ALL candidate declarations (zero sorryAx).
+7. Identity Guard (AND semantics: LiftDom = LiftCod AND liftT = id).
+8. Sequential dependent binder type matching.
+9. Target linkage, LiftedClaim linkage, and constant reference to liftT.
+10. Machine-readable Method Mode deny-list enforcement (prefix and exact match).
+11. Verification of exact sentinel: CHECK_BRIDGE_SENTINEL_OK.
+Part of representation-lifting-s1 experimental protocol (v0.8).
 """
 
 import sys
@@ -51,6 +53,11 @@ def verify_bridge_with_lean(target_file: str, stub_file: str, admissibility_json
         target_content = f.read()
     with open(stub_file, "r", encoding="utf-8") as f:
         stub_content = f.read()
+
+    # Fail-closed intrusion guard
+    if re.search(r'\bVerifierTrustCore\b', stub_content):
+        return False, "FAIL_CLOSED: Forbidden attempt to access or modify VerifierTrustCore."
+
     with open(CHECK_BRIDGE_LEAN, "r", encoding="utf-8") as f:
         meta_checker_content = f.read()
         
@@ -88,7 +95,7 @@ def verify_bridge_with_lean(target_file: str, stub_file: str, admissibility_json
             f.write(s_body)
             f.write("\nend CandidateExecutor\n")
             f.write("\n\n-- Run verification\n")
-            f.write(f"#eval runCheckBridge `frozen_target `BridgeProp `LiftedClaim `liftT `LiftDom `LiftCod {prohibited_list}\n")
+            f.write(f"#eval VerifierTrustCore.runCheckBridge `frozen_target `BridgeProp `LiftedClaim `liftT `LiftDom `LiftCod {prohibited_list}\n")
             
         cmd = ["lake", "env", "lean", harness_file]
         res = subprocess.run(cmd, cwd=PROJECT_ROOT, capture_output=True, text=True)

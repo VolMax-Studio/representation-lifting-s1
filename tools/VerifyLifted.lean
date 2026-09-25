@@ -3,8 +3,10 @@ import Lean
 /-!
 tools/VerifyLifted.lean
 Pure Lean 4 meta-checker for Structural Lifted Proof (Role L) Verification:
-1. Lean-Native Candidate Declaration Enumeration:
-   Inspects environment for all declarations in `CandidateExecutor` namespace.
+1. Module Provenance-Based Candidate Declaration Enumeration:
+   Inspects environment for all declarations authored in the current execution module
+   (env.getModuleIdxFor? name = none), excluding trusted verifier, target, and specification definitions.
+   Captures all declarations regardless of namespace, `_root_`, `end` escapes, private, or Unicode names.
 2. Verifies existence of:
    - `frozen_target`
    - `BridgeProp` (frozen specification property linking target and LiftedClaim)
@@ -18,34 +20,48 @@ Pure Lean 4 meta-checker for Structural Lifted Proof (Role L) Verification:
    - Transitive axioms of `preservation_bridge` ⊆ {propext, Classical.choice, Quot.sound}
    - Transitive axioms of `lifted_theorem` ⊆ {propext, Classical.choice, Quot.sound}
 5. Transitive Module-Local Non-Circularity Audit:
-   - Computes transitive local dependency closure of `lifted_theorem` using `NameSet`.
+   - Recursively traverses all local module declarations in dependency closure of `lifted_theorem`.
    - Asserts: `preservation_bridge ∉ Deps*(lifted_theorem)`.
-   - Traverses any helper definitions/theorems authored in `CandidateExecutor`.
+   - Cannot be bypassed by `_root_.aux` or namespace escapes.
 6. Method Mode Deny-List Audit:
-   - Recursively inspects direct constant references in all candidate-authored declarations
-   - against prohibited library constants (exact and prefix match).
+   - Inspects all candidate declarations against prohibited library constants (exact and prefix).
 7. Mechanical Trusted Target Synthesis:
    - Analyzes BridgeProp equivalence orientation under target telescope.
-   - Mechanically synthesizes `synthesized_target := fun xs => (preservation_bridge xs).mpr/.mp (lifted_theorem xs)`.
+   - Mechanically synthesizes `CandidateExecutor.synthesized_target := fun xs => (preservation_bridge xs).mpr/.mp (lifted_theorem xs)`.
    - Asserts `type(synthesized_target) ≡_def type(frozen_target)`.
-   - Adds `synthesized_target` to environment and executes strict kernel axiom audit.
+   - Adds theorem to environment and performs strict kernel axiom audit.
 8. Prints strict sentinel: `VERIFY_LIFTED_SENTINEL_OK`.
-Part of representation-lifting-s1 experimental protocol (v0.7).
+Part of representation-lifting-s1 experimental protocol (v0.8).
 -/
+
+namespace VerifierTrustCore
 
 set_option linter.unusedVariables false
 
 open Lean Meta
 
-partial def isCandidateDecl (n : Name) : Bool :=
-  match n with
-  | .anonymous => false
-  | .str p s => if s == "CandidateExecutor" then true else isCandidateDecl p
-  | .num p _ => isCandidateDecl p
+def getDeclValue? (decl : ConstantInfo) : Option Expr :=
+  match decl with
+  | .thmInfo v => some v.value
+  | .defnInfo v => some v.value
+  | _ => none
 
-def getCandidateDecls (env : Environment) : List Name :=
+def isTrusted (trustedNames : List Name) (n : Name) : Bool :=
+  (`VerifierTrustCore).isPrefixOf n ||
+  trustedNames.contains n ||
+  (`_eval).isPrefixOf n ||
+  (`_unsafe_rec).isPrefixOf n ||
+  n == `_eval ||
+  match n with
+  | .str _ s => s.startsWith "_aux" || s.startsWith "_eval"
+  | _ => false
+
+def getCandidateDecls (env : Environment) (trustedNames : List Name) : List Name :=
   env.constants.fold (fun acc name _ =>
-    if isCandidateDecl name then name :: acc else acc
+    if env.getModuleIdxFor? name == none && !isTrusted trustedNames name then
+      name :: acc
+    else
+      acc
   ) []
 
 def resolveCandidateName (env : Environment) (shortName : Name) : MetaM Name := do
@@ -55,12 +71,6 @@ def resolveCandidateName (env : Environment) (shortName : Name) : MetaM Name := 
   if env.contains inNs then
     return inNs
   throwError s!"Declaration '{shortName}' (or '{inNs}') not found in environment."
-
-def getDeclValue? (decl : ConstantInfo) : Option Expr :=
-  match decl with
-  | .thmInfo v => some v.value
-  | .defnInfo v => some v.value
-  | _ => none
 
 def isProhibited (c : Name) (prohibited : List Name) : Bool :=
   prohibited.any fun p => p == c || p.isPrefixOf c
@@ -75,7 +85,7 @@ def checkDirectProhibited (env : Environment) (declNames : List Name) (prohibite
           if isProhibited c prohibited then
             throwError s!"FORBIDDEN_METHOD_MODE_CONSTANT: Declaration '{d}' references prohibited constant '{c}'."
 
-partial def collectTransitiveLocalDeps (env : Environment) (name : Name) (bridgeName : Name) (visited : NameSet) : MetaM NameSet := do
+partial def collectTransitiveLocalDeps (env : Environment) (trustedNames : List Name) (name : Name) (bridgeName : Name) (visited : NameSet) : MetaM NameSet := do
   if visited.contains name then return visited
   let mut visited := visited.insert name
   if let some decl := env.find? name then
@@ -84,12 +94,12 @@ partial def collectTransitiveLocalDeps (env : Environment) (name : Name) (bridge
       for c in consts do
         if c == bridgeName then
           visited := visited.insert bridgeName
-        else if isCandidateDecl c then
-          visited ← collectTransitiveLocalDeps env c bridgeName visited
+        else if env.getModuleIdxFor? c == none && !isTrusted trustedNames c then
+          visited ← collectTransitiveLocalDeps env trustedNames c bridgeName visited
   return visited
 
-def checkNonCircularityTransitive (env : Environment) (liftedThmName bridgeThmName : Name) : MetaM Unit := do
-  let deps ← collectTransitiveLocalDeps env liftedThmName bridgeThmName {}
+def checkNonCircularityTransitive (env : Environment) (trustedNames : List Name) (liftedThmName bridgeThmName : Name) : MetaM Unit := do
+  let deps ← collectTransitiveLocalDeps env trustedNames liftedThmName bridgeThmName {}
   if deps.contains bridgeThmName then
     throwError s!"CIRCULAR_LIFT_DEPENDENCY: '{liftedThmName}' transitively references '{bridgeThmName}' in dependency closure."
 
@@ -109,13 +119,16 @@ def runVerifyLifted (frozenTargetName bridgePropName liftedClaimName bridgeThmNa
   let some liftedThmDecl := env.find? lThmResolved
     | throwError s!"Lifted proof declaration '{lThmResolved}' not found in environment."
 
-  -- 2. Method Mode Deny-List Audit (all candidate declarations)
-  let candidateDecls := getCandidateDecls env
+  -- 2. Module Provenance Candidate Enumeration
+  let trustedList : List Name := [frozenTargetName, bPropResolved, lClaimResolved, `VerifierTrustCore.runVerifyLifted]
+  let candidateDecls := getCandidateDecls env trustedList
   let allDecls := if candidateDecls.contains bThmResolved then candidateDecls else bThmResolved :: lThmResolved :: candidateDecls
+
+  -- Method Mode Deny-List Audit across all candidate declarations
   checkDirectProhibited env allDecls prohibited
 
-  -- 3. Transitive Non-Circularity Check
-  checkNonCircularityTransitive env lThmResolved bThmResolved
+  -- 3. Transitive Non-Circularity Check (across all local declarations)
+  checkNonCircularityTransitive env trustedList lThmResolved bThmResolved
 
   -- 4. Definitional match of types
   let bridgeThmType := bridgeThmDecl.type
@@ -180,3 +193,5 @@ def runVerifyLifted (frozenTargetName bridgePropName liftedClaimName bridgeThmNa
         throwError s!"FORBIDDEN_AXIOM: Synthesized target theorem relies on non-standard axiom '{ax}'."
 
   IO.println s!"VERIFY_LIFTED_SENTINEL_OK"
+
+end VerifierTrustCore

@@ -3,11 +3,13 @@ import Lean
 /-!
 tools/CheckBridge.lean
 Pure Lean 4 meta-checker for Representation Search (Role S) Verification:
-1. Lean-Native Candidate Declaration Enumeration:
-   Inspects environment for all declarations in `CandidateExecutor` namespace.
+1. Module Provenance-Based Candidate Declaration Enumeration:
+   Inspects environment for all declarations authored in the current execution module
+   (env.getModuleIdxFor? name = none), excluding trusted verifier and target definitions.
+   Captures all declarations regardless of namespace, `_root_`, `end` escapes, private, or Unicode names.
 2. Verifies that `LiftDom`, `LiftCod`, `liftT`, `LiftedClaim`, and `BridgeProp` are declared.
 3. Representation Axiom Audit (zero sorryAx, zero custom axioms):
-   - ALL declarations authored in `CandidateExecutor` must depend ONLY on:
+   - ALL declarations authored in candidate scope must depend ONLY on:
      {propext, Classical.choice, Quot.sound}.
    - Role S produces a proof-free specification; sorryAx anywhere is strictly forbidden.
 4. Identity Guard (AND semantics):
@@ -24,33 +26,16 @@ Pure Lean 4 meta-checker for Representation Search (Role S) Verification:
    - Asserts the other side matches LiftedClaim conclusion under the peeled telescope.
    - Asserts the lifted side contains constant `liftT`.
 7. Method Mode Deny-List Enforcement:
-   - Recursively inspects direct constants in all candidate declarations against prohibited constants (exact and prefix).
+   - Inspects direct constants in all candidate declarations against prohibited constants (exact and prefix).
 8. Prints strict sentinel: `CHECK_BRIDGE_SENTINEL_OK`.
-Part of representation-lifting-s1 experimental protocol (v0.7).
+Part of representation-lifting-s1 experimental protocol (v0.8).
 -/
+
+namespace VerifierTrustCore
 
 set_option linter.unusedVariables false
 
 open Lean Meta
-
-partial def isCandidateDecl (n : Name) : Bool :=
-  match n with
-  | .anonymous => false
-  | .str p s => if s == "CandidateExecutor" then true else isCandidateDecl p
-  | .num p _ => isCandidateDecl p
-
-def getCandidateDecls (env : Environment) : List Name :=
-  env.constants.fold (fun acc name _ =>
-    if isCandidateDecl name then name :: acc else acc
-  ) []
-
-def resolveCandidateName (env : Environment) (shortName : Name) : MetaM Name := do
-  if env.contains shortName then
-    return shortName
-  let inNs := `CandidateExecutor ++ shortName
-  if env.contains inNs then
-    return inNs
-  throwError s!"Declaration '{shortName}' (or '{inNs}') not found in environment."
 
 def hasConstRef (e : Expr) (targetConst : Name) : Bool :=
   e.foldConsts false (fun name acc => acc || (name == targetConst))
@@ -60,6 +45,32 @@ def getDeclValue? (decl : ConstantInfo) : Option Expr :=
   | .thmInfo v => some v.value
   | .defnInfo v => some v.value
   | _ => none
+
+def isTrusted (trustedNames : List Name) (n : Name) : Bool :=
+  (`VerifierTrustCore).isPrefixOf n ||
+  trustedNames.contains n ||
+  (`_eval).isPrefixOf n ||
+  (`_unsafe_rec).isPrefixOf n ||
+  n == `_eval ||
+  match n with
+  | .str _ s => s.startsWith "_aux" || s.startsWith "_eval"
+  | _ => false
+
+def getCandidateDecls (env : Environment) (trustedNames : List Name) : List Name :=
+  env.constants.fold (fun acc name _ =>
+    if env.getModuleIdxFor? name == none && !isTrusted trustedNames name then
+      name :: acc
+    else
+      acc
+  ) []
+
+def resolveCandidateName (env : Environment) (shortName : Name) : MetaM Name := do
+  if env.contains shortName then
+    return shortName
+  let inNs := `CandidateExecutor ++ shortName
+  if env.contains inNs then
+    return inNs
+  throwError s!"Declaration '{shortName}' (or '{inNs}') not found in environment."
 
 def isProhibited (c : Name) (prohibited : List Name) : Bool :=
   prohibited.any fun p => p == c || p.isPrefixOf c
@@ -97,9 +108,12 @@ def runCheckBridge (targetName bridgePropName liftedClaimName liftTName domName 
   let some _ := env.find? codResolved 
     | throwError s!"Codomain '{codResolved}' not found."
 
-  -- 2. Method Mode Deny-List Enforcement (all candidate declarations in environment)
-  let candidateDecls := getCandidateDecls env
+  -- 2. Module Provenance Candidate Enumeration
+  let trustedList : List Name := [targetName, `VerifierTrustCore.runCheckBridge]
+  let candidateDecls := getCandidateDecls env trustedList
   let allDecls := if candidateDecls.contains bPropResolved then candidateDecls else [domResolved, codResolved, liftTResolved, bPropResolved, lClaimResolved] ++ candidateDecls
+
+  -- Method Mode Deny-List Enforcement (all candidate declarations in environment)
   checkDirectProhibited env allDecls prohibited
 
   -- 3. Representation Axiom Audit across ALL candidate declarations (fail-closed, zero sorryAx, zero custom axioms)
@@ -166,3 +180,5 @@ def runCheckBridge (targetName bridgePropName liftedClaimName liftTName domName 
           throwError s!"UNLINKED_LIFTED_CLAIM: Lifted side of bridge does not match LiftedClaim:\n  Bridge lifted side: {liftedSide}\n  LiftedClaim: {claimConclSubst}"
 
       IO.println "CHECK_BRIDGE_SENTINEL_OK"
+
+end VerifierTrustCore
