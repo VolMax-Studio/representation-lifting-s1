@@ -43,12 +43,12 @@ This repository hosts the formal preregistration, tooling, calibration fixtures,
 
 ## Preregistration Status
 
-The current preregistration is under **Text/Procedure Gate Review** (`PREREGISTRATION_v0.1_CANDIDATE.md`).
-All gate blockers from initial candidate review have been resolved:
-1. Exact literal target verification and kernel axiom audit ($A_{\text{observed}} \subseteq \{\texttt{propext}, \texttt{Classical.choice}, \texttt{Quot.sound}\}$).
-2. Symmetric H1 amortization formula ($\Delta_L^{(2)}$ vs $\Delta_D^{(2)}$ executed sequentially in the same file).
-3. Generic representation stub (`LiftDom`, `LiftCod`, `liftT`) with mechanical Identity Guard and target linkage verification.
-4. Complete pre-frozen Negative Control outcome matrix and pre-frozen gnomon stub.
-5. ProofNet-Verified mechanical filtering without subjective domain classification.
-6. drand quicknet specification with BLS verification and rejection sampling.
+The current preregistration is under **Byte-Level Text/Procedure Gate Review** (`PREREGISTRATION_v0.3_CANDIDATE.md`).
+All gate blockers have been resolved with pure Lean 4 kernel/MetaM checkers:
+1. Pure Lean exact target match and fail-closed axiom audit (`tools/VerifyTarget.lean` + `tools/verify_proof.sh`).
+2. Pure Lean representation stub and bridge linkage checker (`tools/CheckBridge.lean` + `tools/check_bridge.py`), verified on 6 frozen fixtures.
+3. Explicit execution harness (`tools/executor_harness.py`) and discrete roles (S, D, L) with frozen budgets (3600s/15 turns for S, 10800s/30 turns for D and L).
+4. Pinned model identities (`claude-sonnet-4-6` primary, `gpt-5.6-sol` replication) and live pre-freeze API smoke test (`tools/smoke_test_executor.py`).
+5. Symmetric H1 amortization formula ($\Delta_L^{(2)}$ vs $\Delta_D^{(2)}$ executed sequentially in the same file).
+6. drand quicknet future-round formula ($r = \lfloor (u - 1692803367)/3 \rfloor + 2$ with $u = t_{\text{pub}} + 600$) with verified structural invariants.
 7. Verified lexical tokenizer with 5 golden fixtures and whitespace invariance.

@@ -1,8 +1,9 @@
-# representation-lifting-s1: PREREGISTRATION v0.2 CANDIDATE (SUPERSEDED)
-**Status:** SUPERSEDED BY v0.3 CANDIDATE (see PREREGISTRATION_v0.3_CANDIDATE.md)  
+# representation-lifting-s1: PREREGISTRATION v0.3 CANDIDATE
+**Status:** READY FOR BYTE-LEVEL TEXT/PROCEDURE GATE (SUPERSEDES v0.1 `254e06d8…` AND v0.2 `4fdc0bf4…`)  
 **Author / Principal Investigator:** Ivan Nestorov  
 **Target Toolchain:** Lean 4 (v4.34.0) / Mathlib v4.34.0  
 **Repository Location:** `PORTFOLIO/representation-lifting-s1/`  
+**GitHub Tracking Repo:** `https://github.com/VolMax-Studio/representation-lifting-s1`  
 **Date:** 2026-09-25  
 
 ---
@@ -173,12 +174,7 @@ If the surviving pool count satisfies $N < 3$ (or in the extreme $N = 0$):
 3. **Randomness Value $R$:**  
    $R = \text{SHA-256}(\text{signature})$ of round $r_{\text{scheduled}}$, verified via BLS verification against the quicknet public key.
 4. **Rejection-Sampling Algorithm (`tools/select_indices.py`):**  
-   Selection of 3 distinct indices $i \in \{0, 1, \dots, N-1\}$ proceeds deterministically without modulo bias:
-   ```python
-   # Evaluated deterministically via tools/select_indices.py
-   limit = (2**256) - ((2**256) % N)
-   # Hash chain: SHA256("representation-lifting-s1/v0.1\x00" || R || uint64_be(j))
-   ```
+   Selection of 3 distinct indices $i \in \{0, 1, \dots, N-1\}$ proceeds deterministically without modulo bias via rejection sampling.
 
 ---
 
@@ -186,7 +182,10 @@ If the surviving pool count satisfies $N < 3$ (or in the extreme $N = 0$):
 
 ### 4.1 Mechanical Representation-Search Protocol (`LIFT-NOT-FOUND`)
 For each blind problem:
-1. **Search Budget:** Exactly 60 minutes wall-clock time.
+1. **Search Executor Role (S):**
+   - **Pinned Identity:** `claude-sonnet-4-6` (Primary) / `gpt-5.6-sol` (Replication).
+   - **Search Budget:** Exactly 3600 seconds wall-clock time, capped at 15 turns in `tools/executor_harness.py`.
+   - **Tool Access:** Read target statement, read admissibility manifest, write candidate stub file, execute Lean compiler diagnostics. Zero access to external search or human assistance.
 2. **Deliverable Requirement:** The search phase must produce an executable Lean stub file conforming to the generalized representation interface:
    ```lean
    -- Generic representation types
@@ -202,69 +201,62 @@ For each blind problem:
    -- Preservation bridge (sorry allowed ONLY here)
    theorem preservation_bridge ... : ... ↔ ... := by sorry
    ```
-3. **Mechanical Verification, Identity Guard, & Target Linkage:**
-   Evaluated strictly by the automated verification tool `tools/check_bridge.py`:
-   - **Toolchain Compilation:** The stub must compile with zero errors on the pinned toolchain (`sorry` permitted strictly inside `preservation_bridge`).
-   - **Identity Guard Check:** In an isolated environment, the stub is checked for definitional triviality:
-     ```lean
-     example : LiftDom = LiftCod := rfl
-     example : liftT = id := rfl
-     ```
-     *Rule:* If the isolated identity check file elaborates without error, the lift is rejected as trivial $\implies$ recorded mechanically as **`LIFT-NOT-FOUND / IDENTITY_GUARD`**. If compilation fails (e.g. types differ or `liftT` is not definitionally `id`), the identity guard is **not** activated.
-     > *The identity guard excludes definitionally identical lifts. It does not purport to decide whether every surviving representation is mathematically substantive.* Any vacuous but non-identity lift proceeds into execution and absorbs the setup penalty.
-   - **Target Linkage Verification:**  
-     To prevent disconnected or tautological bridges, `tools/check_bridge.py`:
-     1. Peels off all leading universal $\Pi$-binders of the target theorem and `preservation_bridge`, ensuring no unquantified extraneous hypotheses are introduced.
-     2. Verifies that the conclusion is an equivalence (`↔`).
-     3. Rejects tautologies of the form $P \leftrightarrow P$.
-     4. Verifies that one side of the equivalence matches the target theorem's conclusion.
-     5. Verifies that the other side of the equivalence references the constant `liftT`.
-     If the bridge fails any of these checks $\implies$ recorded as **`LIFT-NOT-FOUND / UNLINKED_BRIDGE`**.  
-     *(Tested and locked against 6 frozen fixtures in `fixtures/bridge/`).*
-
+3. **Pure Lean Meta-Checker Verification (`tools/CheckBridge.lean`):**
+   The candidate stub is verified directly inside the Lean 4 kernel/MetaM via `tools/check_bridge.py`:
+   - **Compilation:** The entire stub must elaborate without error on the pinned toolchain.
+   - **Sorry Audit:** `sorryAx` is permitted strictly inside `preservation_bridge`. Any dependency on `sorryAx` in `LiftDom`, `LiftCod`, `liftT`, or auxiliary definitions causes immediate failure.
+   - **Identity Guard Check:** Evaluates definitional equality in the Lean kernel:
+     $$\text{isDefEq}(\text{LiftDom}, \text{LiftCod}) \land \text{isDefEq}(\text{liftT}, \text{id})$$
+     If definitionally trivial, fails with **`LIFT-NOT-FOUND / IDENTITY_GUARD`**.
+   - **Target Linkage Verification:**
+     1. Uses `forallTelescope` on `frozen_target` and `preservation_bridge`.
+     2. Substitutes bridge free variables with target free variables (`replaceFVars`), asserting binder count and types match identically (eliminating extraneous unquantified hypotheses).
+     3. Asserts the conclusion is an equivalence (`↔`).
+     4. Asserts LHS and RHS are not syntactically tautological ($P \leftrightarrow P$).
+     5. Asserts one side is definitionally equal (`isDefEq`) to the target conclusion.
+     6. Asserts the other side contains an explicit constant reference (`Expr.const`) to `liftT`.
+   *(Fully verified and regression-tested against 6 frozen fixtures in `fixtures/bridge/`).*
 4. **Outcome Assignment:**
-   - Compiles cleanly, passes Identity Guard, and passes Target Linkage: Canonicalized, SHA-256 hashed, locked, and passed to Executor L as `LIFT-FOUND`.
+   - Passes all checks: Canonicalized, SHA-256 hashed, locked, and passed to Executor L as `LIFT-FOUND`.
    - Any failure: Mechanically recorded as **`LIFT-NOT-FOUND`**. No human subjective adjudication.
 
 ### 4.2 Exact-Target Verification & Axiom Audit
 To guarantee that branches prove literally the assigned target theorem:
-1. **Literal Target Checker:**
-   For every proof submitted by an executor (whether $D$ or $L$), an automated verification harness generates a verification wrapper:
-   ```lean
-   -- Auto-generated from POOL.tsv / frozen calibration spec
-   example : <literal target statement> := executor_theorem
-   ```
-   Must elaborate with zero errors on the pinned toolchain.
-2. **Axiom Audit:**
-   The axiom profile extracted via kernel introspection must satisfy:
+1. **Pure Lean Meta-Checker (`tools/VerifyTarget.lean`):**
+   Proof verification executes directly in the Lean kernel via `tools/verify_proof.sh`:
+   $$\text{isDefEq}(\text{type}(\texttt{executor\_theorem}), \text{type}(\texttt{frozen\_target}))$$
+   - Kernel definitional equality automatically resolves $\alpha$-renaming of bound variables, implicit binders, dependent $\Pi$-types, existentials, and equivalences without brittle text interpolation.
+2. **Fail-Closed Axiom Audit:**
+   Transitive axioms are extracted via `Lean.collectAxioms` and certified against the frozen whitelist:
    $$A_{\text{observed}} \subseteq \{\texttt{propext}, \texttt{Classical.choice}, \texttt{Quot.sound}\}$$
-   Any proof relying on `sorryAx`, custom axioms, or undefined constants is rejected as invalid (`FAILED_VERIFICATION`).
-3. **Fail-Closed Verification Script:**
-   Executed via `tools/verify_proof.sh`, replicating the fail-closed scanning standards of Rung B.
+   Any proof depending on `sorryAx`, custom axioms, or unproved constants fails closed.
+3. **Fail-Closed Scan:**
+   Rejects forbidden tokens (`sorry`, `admit`, `native_decide`) prior to compilation.
 
-### 4.3 Executor Isolation & Fixed Effort Budget
-1. **Context Isolation:**
-   - **Direct Executor ($D$):** Operates in a fresh context containing only the target theorem statement and the admissibility manifest. Zero access to the search transcript, stub, or representation definitions.
-   - **Lifted Executor ($L$):** Operates in a fresh context containing the target theorem statement, the admissibility manifest, and the frozen `LIFT-FOUND` stub file.
-2. **Uniform Prompting:**
-   - Neutral prompt text: *"Write a clear, maintainable Lean proof."*
-   - Prompts must **never** instruct length or tactic minimization. Prompt SHA-256 is recorded in the execution manifest.
-3. **Executor Specifications & Pre-Freeze Smoke Test:**
-   - **Primary Fixed Model:** `claude-sonnet-4-6` (Anthropic active tier) or dated snapshot `claude-opus-4-5-20251101`.
-   - **Replication Model:** `gpt-5.6-sol` (OpenAI active tier) or dated snapshot `gpt-4o-2024-08-06`.
-   - **Mandatory Pre-Freeze Smoke Test:** Prior to human ratification (Gate 6), a minimal API connectivity test (`tools/smoke_test_executor.py`) must be executed to record HTTP 200 availability and returned model identity into `tools/smoke_test_receipt.json`. If an API endpoint is deprecated or inaccessible, the freeze gate fails closed.
-4. **Binding Effort Budget:**
-   - Exactly **3 hours wall-clock time** per branch.
-   - Wall-clock timeout is the single binding termination condition. (Model tokens, solver steps, and heartbeats are recorded strictly as secondary descriptive metrics).
+### 4.3 Executor Specifications, Harness, & Pre-Freeze Smoke Test
+1. **Pinned Model Identities (No In-Flight Fallbacks):**
+   - **Primary Suite:** Anthropic `claude-sonnet-4-6` for S, D, and L.
+   - **Replication Suite:** OpenAI `gpt-5.6-sol` for S, D, and L.
+   - *Rule:* Pinned IDs are immutable. If an API endpoint is unavailable during the execution window, the run fails closed. A model migration requires a formal v0.4 candidate release, not an ambient fallback.
+2. **Cryptographic Execution Harness (`tools/executor_harness.py`):**
+   - Governs interaction turns, compiler feedback loop, and immutable logging.
+   - **Binding Budgets:**
+     - Role S: 3600 seconds wall-clock, max 15 interaction turns.
+     - Role D: 10800 seconds wall-clock, max 30 interaction turns.
+     - Role L: 10800 seconds wall-clock, max 30 interaction turns.
+   - Termination occurs strictly upon verified completion or wall-clock expiration.
+3. **Context Isolation:**
+   - **Direct ($D$):** Target statement + admissibility manifest. Zero stub or search access.
+   - **Lifted ($L$):** Target statement + admissibility manifest + frozen `LIFT-FOUND` stub.
+4. **Mandatory Pre-Freeze API Smoke Test (`tools/smoke_test_executor.py`):**
+   Prior to human ratification (Gate 6), a live HTTP ping must be executed against both endpoints, recording HTTP 200 and exact returned model IDs into `tools/smoke_test_receipt.json`. Missing credentials or non-200 responses fail the pre-freeze gate.
 
 ### 4.4 Immutable Admissibility Manifest
 - **Method Mode (Primary):** Prohibits terminal target-equivalent library lemmas.
   - Calibration Fibonacci: Prohibits `Int.fib_succ_mul_fib_pred_sub_fib_sq` and `Nat.fib_gcd`.
   - Calibration Pell: Prohibits `Pell.Solution₁` generator theorems that solve the goal by definition.
   - Calibration Roots of Unity: Prohibits `IsPrimitiveRoot.geom_sum_eq_zero`.
-- **Blind Manifest Gate:**
-  - Case-specific manifests are frozen **after** drand sampling but **prior** to launching proof attempts.
-  - If an unforeseen lemma arises during execution that trivializes the target, it is flagged as `PROTOCOL_AMBIGUITY`; the original outcome stands, and any re-run is conducted strictly as a secondary sensitivity analysis.
+- **Blind Manifest Gate:** Case-specific manifests are frozen **after** drand sampling but **prior** to launching proof attempts. Unforeseen lemmas are flagged as `PROTOCOL_AMBIGUITY` (original outcome stands; re-run strictly as sensitivity run).
 
 ---
 
@@ -284,17 +276,11 @@ Conditional **strictly** on $O_{\text{completion}} = \text{BOTH}$, the footprint
 $$\Delta W_{\text{token}} = W_L - W_D$$
 
 Where $W_{\text{token}}$ is the **normalized authored Lean lexical token count**:
-- **Tokenization Mechanism:** Evaluated via a frozen Python tokenization script (`tools/count_lean_tokens.py`) that implements Lean's lexical grammar.
-- **Inclusions:** Includes all newly authored code required by the branch (for $L$: includes `bridge` + `representation` + `theorem`).
-- **Exclusions:** Strips all comments, blank lines, whitespace formatting, and `import` declarations.
-- **Whitespace Invariance:** Formatting variations (e.g. indentation, line breaks, or multiple spaces) produce an identical token stream and identical count.
-- **Golden Test Fixtures:**
-  The repository commits a set of golden test fixtures (`fixtures/*.lean`) with pre-calculated expected token counts covering critical lexical edge cases:
-  1. Nested block comments (`/- /- ... -/ -/`) -> 7 tokens.
-  2. Quoted identifiers (`«foo bar»`) -> 15 tokens.
-  3. Unicode mathematical symbols -> 29 tokens.
-  4. String literals containing comment markers (`"text -- not a comment"`) -> 12 tokens.
-  5. String literals containing escaped quotes (`"text \"escaped\""`) -> 12 tokens.
+- Evaluated via `tools/count_lean_tokens.py` implementing Lean's lexical grammar.
+- Includes all newly authored code (for $L$: includes `bridge` + `representation` + `theorem`).
+- Strips comments, blank lines, whitespace, and `import` lines.
+- Invariant to formatting and whitespace variations.
+- Verified against 5 golden test fixtures in `fixtures/`.
 
 > **Metric Interpretation Disclaimer:**  
 > *$W_{\text{token}}$ measures artifact size under a fixed authoring protocol; it is not interpreted as human effort, cognitive difficulty, or semantic proof complexity.*

@@ -1,11 +1,8 @@
-import Mathlib
-
-abbrev LiftDom := ℕ
-abbrev LiftCod := ℕ × Unit
+abbrev LiftDom := Nat
+abbrev LiftCod := Nat × Unit
 
 def liftT (n : LiftDom) : LiftCod := (n, ())
 
--- Fails because bridge introduces an extra hypothesis (h_extra : n > 100) not present in target
-theorem preservation_bridge (n : ℕ) (h_extra : n > 100) :
-    (n + 0 = n) ↔ ((liftT n).1 + 0 = (liftT n).1) := by
+-- Fails because bridge introduces an extra binder (h_extra : m > 100) not in target
+theorem preservation_bridge (m : Nat) (h_extra : m > 100) : (m + 0 = m) ↔ ((liftT m).1 + 0 = (liftT m).1) := by
   sorry

@@ -1,1 +1,1 @@
-(n : ℕ) (hn : 2 ≤ n) : ∑ k ∈ Finset.range n, Real.cos (2 * Real.pi * k / n) = 0
+theorem frozen_target (n : Nat) (hn : 2 <= n) : n + 0 = n := by sorry
