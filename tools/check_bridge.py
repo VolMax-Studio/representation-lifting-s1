@@ -162,24 +162,19 @@ def verify_bridge_with_lean(target_file: str, stub_file: str, admissibility_json
         if res_cc.returncode != 0:
             return False, f"FAIL_CLOSED: Candidate module failed kernel replay via leanchecker: {res_cc.stderr}"
 
-        # Step C: Host-side Semantic Verifier
-        ver_lean = os.path.join(tmp_dir, "VerifierSModule.lean")
-        with open(ver_lean, "w", encoding="utf-8") as f:
-            f.write("import Lean\n")
-            f.write("import TrustedTargetModule\n")
-            f.write("import CandidateSModule\n\n")
-            f.write(m_body)
-            f.write("\n\n")
-            f.write(f"#eval! VerifierTrustCore.runCheckBridge `CandidateSModule `frozen_target {prohibited_list}\n")
+        # Step C: Execute Standalone Compiled Adjudicator Binary
+        verifier_bin = os.path.join(PROJECT_ROOT, ".lake", "build", "bin", "verifier")
+        if not os.path.isfile(verifier_bin) or not os.access(verifier_bin, os.X_OK):
+            subprocess.run(["lake", "build", "verifier"], cwd=PROJECT_ROOT, check=True)
 
-        res_v = subprocess.run(["lake", "env", "lean", ver_lean], cwd=PROJECT_ROOT, env=env, capture_output=True, text=True)
+        res_v = subprocess.run([verifier_bin, "bridge", "CandidateSModule", "frozen_target", prohibited_list], cwd=PROJECT_ROOT, env=env, capture_output=True, text=True)
         output = (res_v.stdout + "\n" + res_v.stderr).strip()
 
-        if res_v.returncode == 0 and SENTINEL in output:
+        if res_v.returncode == 0 and (SENTINEL in output or '"verdict": "PASS"' in output):
             return True, "BRIDGE_VALID: Structure, Identity Guard, and LiftedClaim Linkage verified."
         else:
             lines = [line for line in output.splitlines() if "error" in line.lower() or "IDENTITY_GUARD" in line or "TAUTOLOGICAL" in line or "BINDER_" in line or "BRIDGE_" in line or "FORBIDDEN_" in line]
-            err_msg = lines[0] if lines else (output[:200] if output else "Elaboration failure")
+            err_msg = lines[0] if lines else (output[:200] if output else "Verification failure")
             return False, f"VERIFICATION_FAILED: {err_msg}"
 
     finally:

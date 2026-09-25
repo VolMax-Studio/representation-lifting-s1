@@ -112,6 +112,26 @@ def test_verify_proof():
         assert "FAIL_CLOSED" in res_fs.stderr or "FAIL_CLOSED" in res_fs.stdout
         print("test_verify_proof (adversarial run_cmd filesystem write fail-closed rejection): PASS")
 
+        # 11. Adversarial elab_rules command elaborator hijack
+        # Invariant: Malicious elaborator registers successfully, leanchecker passes kernel replay,
+        # but standalone compiled adjudicator executes untainted MetaM verification and rejects bogus theorem.
+        elab_hijack = os.path.join(ROOT_DIR, "fixtures", "security", "elab_rules_eval_hijack.lean")
+        res_elab = subprocess.run([VERIFY_SCRIPT, target_file, elab_hijack, "candidate_fake_thm"],
+                                  capture_output=True, text=True)
+        assert res_elab.returncode != 0, "Expected FAIL for elab_rules hijack candidate, got returncode 0"
+        assert "VERIFICATION_FAILED" in res_elab.stderr or "VERIFICATION_FAILED" in res_elab.stdout
+        print("test_verify_proof (adversarial elab_rules hijack rejected under compiled verifier): PASS")
+
+        # 12. Adversarial macro_rules syntax hijack
+        # Invariant: Malicious syntax macro registers successfully, leanchecker passes,
+        # but compiled verifier executable is immune to command dispatch hijacking and rejects bogus theorem.
+        macro_hijack = os.path.join(ROOT_DIR, "fixtures", "security", "macro_rules_eval_hijack.lean")
+        res_macro = subprocess.run([VERIFY_SCRIPT, target_file, macro_hijack, "candidate_fake_thm"],
+                                   capture_output=True, text=True)
+        assert res_macro.returncode != 0, "Expected FAIL for macro_rules hijack candidate, got returncode 0"
+        assert "VERIFICATION_FAILED" in res_macro.stderr or "VERIFICATION_FAILED" in res_macro.stdout
+        print("test_verify_proof (adversarial macro_rules hijack rejected under compiled verifier): PASS")
+
 if __name__ == "__main__":
     test_verify_proof()
     print("ALL VERIFY PROOF TESTS PASSED.")

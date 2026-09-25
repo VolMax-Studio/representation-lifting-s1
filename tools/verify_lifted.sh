@@ -163,29 +163,18 @@ if ! lake env leanchecker CandidateLModule > "$TMP_DIR/leanchecker.log" 2>&1; th
     exit 1
 fi
 
-# Step D: Execute Host-side Semantic Verifier
-VERIFY_LEAN="$TMP_DIR/VerifierLModule.lean"
-{
-    echo "import Lean"
-    echo "import FrozenSpecModule"
-    echo "import CandidateLModule"
-    echo ""
-    grep -vE '^\s*import\b' "$SCRIPT_DIR/VerifyLifted.lean"
-    echo ""
-    echo "#eval! VerifierTrustCore.runVerifyLifted \`CandidateLModule \`FrozenSpecModule \`frozen_target $PROHIBITED_LEAN_LIST"
-} > "$VERIFY_LEAN"
+# Step D: Execute Standalone Compiled Adjudicator Binary
+VERIFIER_BIN="$PROJECT_ROOT/.lake/build/bin/verifier"
+if [ ! -x "$VERIFIER_BIN" ]; then
+    echo "VERIFIER_BINARY_MISSING: Building verifier executable..." >&2
+    lake build verifier >/dev/null 2>&1
+fi
 
 OUTPUT="$TMP_DIR/verify_output.txt"
 cd "$PROJECT_ROOT"
 
-if ! lake env lean "$VERIFY_LEAN" > "$OUTPUT" 2>&1; then
-    echo "VERIFY_LIFTED_FAILED: Type mismatch, circularity, non-standard axiom, or prohibited constants used:" >&2
-    cat "$OUTPUT" >&2
-    exit 1
-fi
-
-if ! grep -q "VERIFY_LIFTED_SENTINEL_OK" "$OUTPUT"; then
-    echo "VERIFY_LIFTED_FAILED: Sentinel VERIFY_LIFTED_SENTINEL_OK missing from output:" >&2
+if ! lake env "$VERIFIER_BIN" lifted CandidateLModule FrozenSpecModule frozen_target "$PROHIBITED_LEAN_LIST" > "$OUTPUT" 2>&1; then
+    echo "VERIFY_LIFTED_FAILED: Lifted verification failed:" >&2
     cat "$OUTPUT" >&2
     exit 1
 fi

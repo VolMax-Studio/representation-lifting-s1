@@ -146,29 +146,18 @@ if ! lake env leanchecker CandidateDModule > "$TMP_DIR/leanchecker.log" 2>&1; th
     exit 1
 fi
 
-# Step C: Execute Host-side Semantic Verifier
-VERIFY_LEAN="$TMP_DIR/VerifierDModule.lean"
-{
-    echo "import Lean"
-    echo "import TrustedTargetModule"
-    echo "import CandidateDModule"
-    echo ""
-    grep -vE '^\s*import\b' "$SCRIPT_DIR/VerifyTarget.lean"
-    echo ""
-    echo "#eval! VerifierTrustCore.runVerifyTarget \`CandidateDModule \`frozen_target \`$EXECUTOR_THEOREM $PROHIBITED_LEAN_LIST"
-} > "$VERIFY_LEAN"
+# Step C: Execute Standalone Compiled Adjudicator Binary
+VERIFIER_BIN="$PROJECT_ROOT/.lake/build/bin/verifier"
+if [ ! -x "$VERIFIER_BIN" ]; then
+    echo "VERIFIER_BINARY_MISSING: Building verifier executable..." >&2
+    lake build verifier >/dev/null 2>&1
+fi
 
 OUTPUT="$TMP_DIR/verify_output.txt"
 cd "$PROJECT_ROOT"
 
-if ! lake env lean "$VERIFY_LEAN" > "$OUTPUT" 2>&1; then
-    echo "VERIFICATION_FAILED: Type mismatch, non-standard axiom, or prohibited constants used:" >&2
-    cat "$OUTPUT" >&2
-    exit 1
-fi
-
-if ! grep -q "VERIFICATION_SUCCESS" "$OUTPUT"; then
-    echo "VERIFICATION_FAILED: Sentinel VERIFICATION_SUCCESS missing from output:" >&2
+if ! lake env "$VERIFIER_BIN" target CandidateDModule frozen_target "$EXECUTOR_THEOREM" "$PROHIBITED_LEAN_LIST" > "$OUTPUT" 2>&1; then
+    echo "VERIFICATION_FAILED: Target verification failed:" >&2
     cat "$OUTPUT" >&2
     exit 1
 fi

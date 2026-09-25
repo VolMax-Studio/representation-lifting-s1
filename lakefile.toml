@@ -9,3 +9,7 @@ rev = "v4.34.0"
 
 [[lean_lib]]
 name = "RepresentationLifting"
+
+[[lean_exe]]
+name = "verifier"
+root = "Verifier"
