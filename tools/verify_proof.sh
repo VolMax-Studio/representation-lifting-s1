@@ -27,29 +27,52 @@ if grep -En "$FORBIDDEN_PATTERN" "$EXECUTOR_LEAN_FILE" >/dev/null 2>&1; then
     exit 1
 fi
 
-# 2. Construct Lean verification harness combining frozen target, executor proof, and meta-checker
-VERIFY_LEAN="$TMP_DIR/VerifyHarness.lean"
+# 2. Extract imports from target and executor files to place them at the absolute top
+EXTRACT_SCRIPT='
+import sys, re
+imports = ["import Lean"]
+body = []
+for p in sys.argv[1:-1]:
+    with open(p, "r", encoding="utf-8") as f:
+        for line in f:
+            if re.match(r"^\s*import\b", line):
+                imp = line.strip()
+                if imp not in imports:
+                    imports.append(imp)
+            else:
+                body.append(line)
+with open(sys.argv[-1], "w", encoding="utf-8") as out:
+    for imp in imports:
+        out.write(imp + "\n")
+'
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VERIFY_LEAN="$TMP_DIR/VerifyHarness.lean"
 
-cat <<EOF > "$VERIFY_LEAN"
-import Lean
+# Combine imports at top, followed by VerifyTarget meta-checker, target, executor, and eval
+python3 -c "$EXTRACT_SCRIPT" "$FROZEN_TARGET_FILE" "$EXECUTOR_LEAN_FILE" "$SCRIPT_DIR/VerifyTarget.lean" "$TMP_DIR/imports.lean"
 
--- Include core VerifyTarget definitions
-$(cat "$SCRIPT_DIR/VerifyTarget.lean")
-
--- Include frozen target declaration
-$(cat "$FROZEN_TARGET_FILE")
-
--- Include executor declarations
-$(cat "$EXECUTOR_LEAN_FILE")
-
--- Execute meta-checker
-#eval runVerifyTarget \`frozen_target \`$EXECUTOR_THEOREM
-EOF
+cat "$TMP_DIR/imports.lean" > "$VERIFY_LEAN"
+echo "" >> "$VERIFY_LEAN"
+echo "-- Core VerifyTarget definitions" >> "$VERIFY_LEAN"
+grep -vE '^\s*import\b' "$SCRIPT_DIR/VerifyTarget.lean" >> "$VERIFY_LEAN"
+echo "" >> "$VERIFY_LEAN"
+echo "-- Target statement" >> "$VERIFY_LEAN"
+grep -vE '^\s*import\b' "$FROZEN_TARGET_FILE" >> "$VERIFY_LEAN"
+echo "" >> "$VERIFY_LEAN"
+echo "-- Executor declarations" >> "$VERIFY_LEAN"
+grep -vE '^\s*import\b' "$EXECUTOR_LEAN_FILE" >> "$VERIFY_LEAN"
+echo "" >> "$VERIFY_LEAN"
+echo "#eval runVerifyTarget \`frozen_target \`$EXECUTOR_THEOREM" >> "$VERIFY_LEAN"
 
 # 3. Execute Lean verification
 OUTPUT="$TMP_DIR/verify_output.txt"
-if ! lake env lean "$VERIFY_LEAN" > "$OUTPUT" 2>&1; then
+CMD=(lean "$VERIFY_LEAN")
+if command -v lake >/dev/null 2>&1 && [ -f "lakefile.toml" ]; then
+    CMD=(lake env lean "$VERIFY_LEAN")
+fi
+
+if ! "${CMD[@]}" > "$OUTPUT" 2>&1; then
     echo "VERIFICATION_FAILED: Proof does not elaborate, types mismatch, or non-standard axioms used:" >&2
     cat "$OUTPUT" >&2
     exit 1

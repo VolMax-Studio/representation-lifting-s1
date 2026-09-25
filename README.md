@@ -43,12 +43,13 @@ This repository hosts the formal preregistration, tooling, calibration fixtures,
 
 ## Preregistration Status
 
-The current preregistration is under **Byte-Level Text/Procedure Gate Review** (`PREREGISTRATION_v0.3_CANDIDATE.md`).
+The current preregistration is under **Byte-Level Text/Procedure Gate Review** (`PREREGISTRATION_v0.4_CANDIDATE.md`).
 All gate blockers have been resolved with pure Lean 4 kernel/MetaM checkers:
 1. Pure Lean exact target match and fail-closed axiom audit (`tools/VerifyTarget.lean` + `tools/verify_proof.sh`).
-2. Pure Lean representation stub and bridge linkage checker (`tools/CheckBridge.lean` + `tools/check_bridge.py`), verified on 6 frozen fixtures.
-3. Explicit execution harness (`tools/executor_harness.py`) and discrete roles (S, D, L) with frozen budgets (3600s/15 turns for S, 10800s/30 turns for D and L).
+2. Pure Lean representation stub and bridge linkage checker (`tools/CheckBridge.lean` + `tools/check_bridge.py`), verified on 11 frozen fixtures across all decision branches (AND Identity Guard, sequential dependent binder comparison, representation axiom whitelist).
+3. Concrete execution harness state machine (`tools/executor_harness.py`) and discrete roles (S, D, L) with frozen budgets (3600s/15 turns for S, 10800s/30 turns for D and L).
 4. Pinned model identities (`claude-sonnet-4-6` primary, `gpt-5.6-sol` replication) and live pre-freeze API smoke test (`tools/smoke_test_executor.py`).
-5. Symmetric H1 amortization formula ($\Delta_L^{(2)}$ vs $\Delta_D^{(2)}$ executed sequentially in the same file).
-6. drand quicknet future-round formula ($r = \lfloor (u - 1692803367)/3 \rfloor + 2$ with $u = t_{\text{pub}} + 600$) with verified structural invariants.
-7. Verified lexical tokenizer with 5 golden fixtures and whitespace invariance.
+5. Canonical ProofNet input bundle (header + helper + theorem) with automatic top-level import hoisting.
+6. Symmetric H1 amortization formula ($\Delta_L^{(2)}$ vs $\Delta_D^{(2)}$ executed sequentially in the same file).
+7. drand quicknet future-round formula ($r = \lfloor (u - 1692803367)/3 \rfloor + 2$ with $u = t_{\text{pub}} + 600$) with verified structural invariants.
+8. Verified lexical tokenizer with 5 golden fixtures and whitespace invariance.

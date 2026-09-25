@@ -1,8 +1,9 @@
-# representation-lifting-s1: PREREGISTRATION v0.3 CANDIDATE (SUPERSEDED)
-**Status:** SUPERSEDED BY v0.4 CANDIDATE (see PREREGISTRATION_v0.4_CANDIDATE.md)  
+# representation-lifting-s1: PREREGISTRATION v0.4 CANDIDATE
+**Status:** READY FOR BYTE-LEVEL TEXT/PROCEDURE GATE (SUPERSEDES v0.1 `254e06d8…`, v0.2 `4fdc0bf4…`, AND v0.3 `da532b0e…`)  
 **Author / Principal Investigator:** Ivan Nestorov  
 **Target Toolchain:** Lean 4 (v4.34.0) / Mathlib v4.34.0  
 **Repository Location:** `PORTFOLIO/representation-lifting-s1/`  
+**GitHub Tracking Repo:** `https://github.com/VolMax-Studio/representation-lifting-s1`  
 **Date:** 2026-09-25  
 
 ---
@@ -122,9 +123,13 @@ Evaluates whether a representation-first search can discover a valid representat
 
 ### 3.1 Source Corpus & Filtering Pipeline
 1. **Base Corpus:** `ProofNet-Verified` (commit-pinned repository, containing 367 source cases).
-2. **Elimination of Subjective Domain Filter:**  
+2. **Canonical ProofNet Bundle:**  
+   To preserve full elaborability in Lean 4 without manual syntax parsing, each problem entry is assembled canonicalized as:
+   $$\text{Canonical Target} = \text{header} + \text{helper} + \text{frozen\_target declaration}$$
+   All `import` statements are automatically hoisted to the head of the file during verification.
+3. **Elimination of Subjective Domain Filter:**  
    Because ProofNet-Verified lacks an authoritative `NumberTheory`/`Algebra` column in its published schema, **no manual domain classification is permitted**. All 367 cases enter the mechanical pipeline. If a topological or analytic problem fails to yield a representation lift, that failure is recorded as an authentic `LIFT-NOT-FOUND`.
-3. **Mechanical Nontriviality Filter:**  
+4. **Mechanical Nontriviality Filter:**  
    Each candidate theorem is tested against 4 independent tactics under a strict heartbeat ceiling:
    - `by rfl`
    - `by decide`
@@ -132,10 +137,10 @@ Evaluates whether a representation-first search can discover a valid representat
    - `by ring`
    - Parameter: `set_option maxHeartbeats 200000`.
    - Implemented via a single hashed script (`tools/nontriviality_filter.sh`). Any problem solved by any of the 4 tactics is excluded.
-4. **Verbatim Toolchain Compilation Filter:**
+5. **Verbatim Toolchain Compilation Filter:**
    - Every surviving theorem statement must elaborate and compile **verbatim** on the pinned toolchain (`Lean 4 v4.34.0` / `Mathlib v4.34.0`) without editing any statement line, import, or type signature.
    - Any candidate failing verbatim compilation is assigned to `EXCLUDED_TOOLCHAIN_INCOMPATIBLE.tsv` with compiler error diagnostics and excluded prior to pool serialization.
-5. **Training Contamination Disclaimer:**
+6. **Training Contamination Disclaimer:**
    > *The corpus is public and prior model exposure cannot be excluded or audited. Fresh contexts prevent conversational leakage between experimental branches; they do not establish training-data decontamination.*
 
 ### 3.2 Pool Exhaustion & Insufficient Pool Rule
@@ -203,18 +208,27 @@ For each blind problem:
 3. **Pure Lean Meta-Checker Verification (`tools/CheckBridge.lean`):**
    The candidate stub is verified directly inside the Lean 4 kernel/MetaM via `tools/check_bridge.py`:
    - **Compilation:** The entire stub must elaborate without error on the pinned toolchain.
-   - **Sorry Audit:** `sorryAx` is permitted strictly inside `preservation_bridge`. Any dependency on `sorryAx` in `LiftDom`, `LiftCod`, `liftT`, or auxiliary definitions causes immediate failure.
-   - **Identity Guard Check:** Evaluates definitional equality in the Lean kernel:
-     $$\text{isDefEq}(\text{LiftDom}, \text{LiftCod}) \land \text{isDefEq}(\text{liftT}, \text{id})$$
-     If definitionally trivial, fails with **`LIFT-NOT-FOUND / IDENTITY_GUARD`**.
-   - **Target Linkage Verification:**
+   - **Representation Layer Axiom Whitelist:**  
+     Transitive axioms of `LiftDom`, `LiftCod`, `liftT`, and any helper definitions must satisfy:
+     $$A_{\text{rep}} \subseteq \{\texttt{propext}, \texttt{Classical.choice}, \texttt{Quot.sound}\}$$
+     *(Zero `sorryAx` and zero custom unproved axioms permitted in representation definitions).*
+   - **Bridge Axiom Whitelist:**  
+     $$A_{\text{bridge}} \subseteq \{\texttt{propext}, \texttt{Classical.choice}, \texttt{Quot.sound}, \texttt{sorryAx}\}$$
+     *(Strictly `sorryAx` allowed in `preservation_bridge`).*
+   - **Identity Guard (AND semantics):** Evaluates definitional equality in the Lean kernel:
+     $$\text{isDefEq}(\text{LiftDom}, \text{LiftCod}) \land \text{isDefEq}(\text{liftT}, @\text{id LiftDom})$$
+     If both domain/codomain are definitionally identical AND `liftT` is definitionally the identity function $\implies$ fails with **`LIFT-NOT-FOUND / IDENTITY_GUARD`**. (Tested and confirmed: same domain + non-id mapping passes; same domain + id mapping fails).
+   - **Sequential Dependent Binder Type Matching:**
      1. Uses `forallTelescope` on `frozen_target` and `preservation_bridge`.
-     2. Substitutes bridge free variables with target free variables (`replaceFVars`), asserting binder count and types match identically (eliminating extraneous unquantified hypotheses).
-     3. Asserts the conclusion is an equivalence (`↔`).
-     4. Asserts LHS and RHS are not syntactically tautological ($P \leftrightarrow P$).
-     5. Asserts one side is definitionally equal (`isDefEq`) to the target conclusion.
-     6. Asserts the other side contains an explicit constant reference (`Expr.const`) to `liftT`.
-   *(Fully verified and regression-tested against 6 frozen fixtures in `fixtures/bridge/`).*
+     2. Asserts binder count matches identically.
+     3. For each binder index $i$, verifies $t_{\text{type}} \equiv_{\text{def}} b_{\text{type}}[\vec{b}_{<i} \mapsto \vec{t}_{<i}]$. Rejects mismatched hypotheses (e.g. $2 \le n$ vs $100 < n$) or mismatched dependent binders.
+   - **Target Linkage Verification:**
+     1. Asserts the conclusion is an equivalence (`↔`).
+     2. Asserts LHS and RHS are not syntactically tautological ($P \leftrightarrow P$).
+     3. Asserts one side is definitionally equal (`isDefEq`) to the target conclusion.
+     4. Asserts the other side contains an explicit constant reference (`Expr.const`) to `liftT`.
+   - **Sentinel Enforcement:** Requires exit code 0 and exact terminal line `CHECK_BRIDGE_SENTINEL_OK`.  
+   *(Fully verified and regression-tested across all 11 frozen fixtures in `tests/test_check_bridge.py`).*
 4. **Outcome Assignment:**
    - Passes all checks: Canonicalized, SHA-256 hashed, locked, and passed to Executor L as `LIFT-FOUND`.
    - Any failure: Mechanically recorded as **`LIFT-NOT-FOUND`**. No human subjective adjudication.
@@ -236,19 +250,21 @@ To guarantee that branches prove literally the assigned target theorem:
 1. **Pinned Model Identities (No In-Flight Fallbacks):**
    - **Primary Suite:** Anthropic `claude-sonnet-4-6` for S, D, and L.
    - **Replication Suite:** OpenAI `gpt-5.6-sol` for S, D, and L.
-   - *Rule:* Pinned IDs are immutable. If an API endpoint is unavailable during the execution window, the run fails closed. A model migration requires a formal v0.4 candidate release, not an ambient fallback.
+   - *Rule:* Pinned IDs are immutable. If an API endpoint is unavailable during the execution window, the run fails closed. A model migration requires a formal v0.5 candidate release, not an ambient fallback.
 2. **Cryptographic Execution Harness (`tools/executor_harness.py`):**
    - Governs interaction turns, compiler feedback loop, and immutable logging.
    - **Binding Budgets:**
      - Role S: 3600 seconds wall-clock, max 15 interaction turns.
      - Role D: 10800 seconds wall-clock, max 30 interaction turns.
      - Role L: 10800 seconds wall-clock, max 30 interaction turns.
-   - Termination occurs strictly upon verified completion or wall-clock expiration.
+   - Termination occurs strictly upon verified completion, turn exhaustion, or wall-clock expiration.
 3. **Context Isolation:**
    - **Direct ($D$):** Target statement + admissibility manifest. Zero stub or search access.
    - **Lifted ($L$):** Target statement + admissibility manifest + frozen `LIFT-FOUND` stub.
 4. **Mandatory Pre-Freeze API Smoke Test (`tools/smoke_test_executor.py`):**
-   Prior to human ratification (Gate 6), a live HTTP ping must be executed against both endpoints, recording HTTP 200 and exact returned model IDs into `tools/smoke_test_receipt.json`. Missing credentials or non-200 responses fail the pre-freeze gate.
+   Prior to human ratification (Gate 6), a live HTTP ping must be executed against both endpoints, verifying:
+   $$\text{verified} = (\text{http\_status} == 200) \land (\text{returned\_model\_id} == \text{pinned\_model\_id})$$
+   Recording verified accessibility into `tools/smoke_test_receipt.json`. Missing credentials or model mismatch fails the pre-freeze gate closed.
 
 ### 4.4 Immutable Admissibility Manifest
 - **Method Mode (Primary):** Prohibits terminal target-equivalent library lemmas.
@@ -335,5 +351,5 @@ Evaluated according to the pre-frozen Control Outcome Matrix in Section 2.3:
 - [ ] **Gate 2:** Verbatim Lean 4 v4.34.0 compilation filter executed; `EXCLUDED_TOOLCHAIN_INCOMPATIBLE.tsv` generated with exact compiler diagnostics.
 - [ ] **Gate 3:** `POOL.tsv` compiled, sorted, and canonical SHA-256 published.
 - [ ] **Gate 4:** Target drand round committed via `tools/drand_schedule.py` ($r_{\text{scheduled}} = \lfloor (u - 1692803367)/3 \rfloor + 2$ with $u = t_{\text{pub}} + 600$).
-- [ ] **Gate 5:** Case-specific admissibility manifests, neutral prompts, tokenization script, and golden test fixtures committed and hashed.
+- [ ] **Gate 5:** Live API Smoke Test executed (`tools/smoke_test_executor.py`), recording HTTP 200 and model ID match into `tools/smoke_test_receipt.json`.
 - [ ] **Gate 6:** Human Ratification by Ivan Nestorov prior to the scheduled publication timestamp of the drand round.

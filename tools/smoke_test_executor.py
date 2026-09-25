@@ -86,8 +86,14 @@ def test_endpoint(spec: dict) -> dict:
             body = json.loads(resp.read().decode("utf-8"))
             record["http_status"] = resp.status
             record["latency_ms"] = round(latency, 2)
-            record["returned_model_id"] = body.get("model")
-            record["verified_accessible"] = (resp.status == 200)
+            returned_id = body.get("model")
+            record["returned_model_id"] = returned_id
+            
+            # Require exact model ID or approved provider snapshot prefix
+            model_matched = (returned_id == spec["pinned_model_id"]) or (returned_id and returned_id.startswith(spec["pinned_model_id"]))
+            record["verified_accessible"] = (resp.status == 200) and model_matched
+            if resp.status == 200 and not model_matched:
+                record["error"] = f"MODEL_ID_MISMATCH: Pinned '{spec['pinned_model_id']}', but endpoint returned '{returned_id}'."
     except urllib.error.HTTPError as e:
         record["http_status"] = e.code
         record["error"] = f"HTTPError {e.code}: {e.read().decode('utf-8', errors='replace')[:200]}"
@@ -103,7 +109,7 @@ def main():
     
     receipt = {
         "timestamp_utc": now_utc,
-        "protocol": "representation-lifting-s1/v0.3",
+        "protocol": "representation-lifting-s1/v0.4",
         "executors": {
             "primary": primary_res,
             "replication": replication_res

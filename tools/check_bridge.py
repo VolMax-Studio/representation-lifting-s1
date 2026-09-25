@@ -2,17 +2,21 @@
 """
 tools/check_bridge.py
 Lean-native representation stub and bridge verification harness.
-Invokes tools/CheckBridge.lean in the Lean kernel/MetaM environment to verify:
-1. Compilation of the representation stub.
-2. Definitional triviality check (Identity Guard: LiftDom = LiftCod or liftT = id).
-3. Target linkage verification (forallTelescope, Iff conclusion, syntactic tautology check,
-   and AST constant reference to liftT).
-4. Strict sorry audit (sorryAx permitted ONLY in preservation_bridge).
+Invokes tools/CheckBridge.lean in the Lean kernel/MetaM environment.
+Enforces:
+1. Extraction of top-level imports to the head of the file.
+2. Lean compilation of the representation stub.
+3. Axiom audit on representation layer (no sorryAx, no custom axioms).
+4. Identity Guard (AND semantics: LiftDom = LiftCod AND liftT = id).
+5. Sequential dependent binder type matching.
+6. Target linkage and AST constant reference to liftT.
+7. Verification of exact sentinel: CHECK_BRIDGE_SENTINEL_OK.
 Part of representation-lifting-s1 experimental protocol.
 """
 
 import sys
 import os
+import re
 import subprocess
 import tempfile
 import shutil
@@ -20,11 +24,22 @@ import shutil
 TOOLS_DIR = os.path.abspath(os.path.dirname(__file__))
 CHECK_BRIDGE_LEAN = os.path.join(TOOLS_DIR, "CheckBridge.lean")
 
+SENTINEL = "CHECK_BRIDGE_SENTINEL_OK"
+
+def extract_imports_and_body(text: str) -> tuple[list[str], str]:
+    imports = []
+    body_lines = []
+    for line in text.splitlines():
+        if re.match(r'^\s*import\b', line):
+            imports.append(line.strip())
+        else:
+            body_lines.append(line)
+    return imports, "\n".join(body_lines)
+
 def verify_bridge_with_lean(target_file: str, stub_file: str) -> tuple[bool, str]:
-    # Check that lean compiler is installed
     lean_bin = shutil.which("lean")
     if not lean_bin:
-        return False, "TOOLCHAIN_ERROR: 'lean' binary not found on PATH. Pinned Lean toolchain is required."
+        raise FileNotFoundError("'lean' required. Pinned Lean toolchain is missing from PATH.")
         
     with open(target_file, "r", encoding="utf-8") as f:
         target_content = f.read()
@@ -33,34 +48,43 @@ def verify_bridge_with_lean(target_file: str, stub_file: str) -> tuple[bool, str
     with open(CHECK_BRIDGE_LEAN, "r", encoding="utf-8") as f:
         meta_checker_content = f.read()
         
+    t_imports, t_body = extract_imports_and_body(target_content)
+    s_imports, s_body = extract_imports_and_body(stub_content)
+    m_imports, m_body = extract_imports_and_body(meta_checker_content)
+    
+    # Deduplicate imports while preserving order
+    all_imports = ["import Lean"]
+    for imp in m_imports + t_imports + s_imports:
+        if imp not in all_imports:
+            all_imports.append(imp)
+            
     with tempfile.TemporaryDirectory() as tmp_dir:
         harness_file = os.path.join(tmp_dir, "CheckBridgeHarness.lean")
         
-        # Build unified verification harness
         with open(harness_file, "w", encoding="utf-8") as f:
-            f.write("import Lean\n\n")
-            f.write("-- Meta-checker definitions\n")
-            f.write(meta_checker_content)
+            # 1. Imports at the absolute top
+            for imp in all_imports:
+                f.write(f"{imp}\n")
+            f.write("\n-- Meta-checker core\n")
+            f.write(m_body)
             f.write("\n\n-- Target statement\n")
-            f.write(target_content)
+            f.write(t_body)
             f.write("\n\n-- Candidate stub\n")
-            f.write(stub_content)
-            f.write("\n\n-- Execute verification\n")
+            f.write(s_body)
+            f.write("\n\n-- Run verification\n")
             f.write("#eval runCheckBridge `frozen_target `preservation_bridge `liftT `LiftDom `LiftCod\n")
             
-        # Execute lean
-        # If lake is available and project is a lake package, use 'lake env lean', otherwise 'lean'
-        cmd = ["lake", "env", "lean", harness_file] if shutil.which("lake") else ["lean", harness_file]
+        cmd = ["lake", "env", "lean", harness_file] if shutil.which("lake") and os.path.exists("lakefile.toml") else ["lean", harness_file]
         res = subprocess.run(cmd, capture_output=True, text=True)
         
         output = (res.stdout + "\n" + res.stderr).strip()
         
-        if res.returncode == 0 and "BRIDGE_VALID" in output:
-            return True, "BRIDGE_VALID: Structure, Identity Guard, and Target Linkage verified."
+        # Must exit with 0 AND contain exact sentinel line
+        if res.returncode == 0 and SENTINEL in output:
+            return True, f"BRIDGE_VALID: Structure, Identity Guard, and Target Linkage verified."
         else:
-            # Extract first meaningful error line
-            lines = [line for line in output.splitlines() if "error" in line.lower() or "IDENTITY_GUARD" in line or "UNLINKED" in line or "TAUTOLOGICAL" in line or "EXTRA_HYPOTHESIS" in line or "NON_EQUIVALENCE" in line]
-            err_msg = lines[0] if lines else (output[:200] if output else "Unknown elaboration failure")
+            lines = [line for line in output.splitlines() if "error" in line.lower() or "IDENTITY_GUARD" in line or "UNLINKED" in line or "TAUTOLOGICAL" in line or "BINDER_" in line or "NON_EQUIVALENCE" in line or "FORBIDDEN_" in line]
+            err_msg = lines[0] if lines else (output[:200] if output else "Elaboration failure")
             return False, f"VERIFICATION_FAILED: {err_msg}"
 
 check_bridge = verify_bridge_with_lean

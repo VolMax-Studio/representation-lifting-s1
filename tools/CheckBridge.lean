@@ -4,18 +4,22 @@ import Lean
 tools/CheckBridge.lean
 Pure Lean 4 meta-checker for Representation Stub verification:
 1. Verifies that `LiftDom`, `LiftCod`, `liftT`, and `preservation_bridge` are declared.
-2. Identity Guard: Evaluates definitional equality `LiftDom = LiftCod` and `liftT = id`.
-   If definitionally trivial, fails with IDENTITY_GUARD.
-3. Target Linkage:
-   - Uses `forallTelescope` and `replaceFVars` to compare target and bridge binders.
-   - Rejects extraneous unquantified hypotheses.
-   - Asserts conclusion is an equivalence (`↔`).
-   - Rejects syntactically tautological equivalences (`P ↔ P`).
-   - Asserts one side matches the target conclusion under the peeled telescope.
+2. Representation Axiom Audit:
+   - LiftDom, LiftCod, liftT must depend ONLY on {propext, Classical.choice, Quot.sound}.
+   - Rejects sorryAx or custom axioms in the representation layer.
+   - preservation_bridge may depend on {propext, Classical.choice, Quot.sound, sorryAx}.
+3. Identity Guard (AND semantics):
+   - Evaluates whether LiftDom = LiftCod AND liftT = id definitionally.
+   - Rejects with IDENTITY_GUARD only if both are true.
+4. Sequential Dependent Binder Type Comparison:
+   - Compares binder counts and types sequentially with replaceFVars.
+   - Rejects extraneous or mismatched hypotheses (e.g. 2 <= n vs 100 < n).
+5. Target Linkage:
+   - Asserts conclusion is an equivalence (↔).
+   - Rejects syntactically tautological equivalences (P ↔ P).
+   - Asserts one side matches target conclusion under the peeled telescope.
    - Asserts the other side contains constant `liftT`.
-4. Sorry Audit:
-   - Asserts `sorryAx` is absent from `LiftDom`, `LiftCod`, and `liftT`.
-   - `sorryAx` is permitted strictly in `preservation_bridge`.
+6. Prints strict sentinel: `CHECK_BRIDGE_SENTINEL_OK`.
 Part of representation-lifting-s1 experimental protocol.
 -/
 
@@ -34,39 +38,51 @@ def runCheckBridge (targetName bridgeName liftTName domName codName : Name) : Me
     | throwError s!"Bridge declaration '{bridgeName}' not found."
   let some liftTDecl := env.find? liftTName 
     | throwError s!"Representation map '{liftTName}' not found."
-  let some domDecl := env.find? domName 
+  let some _ := env.find? domName 
     | throwError s!"Domain '{domName}' not found."
-  let some codDecl := env.find? codName 
+  let some _ := env.find? codName 
     | throwError s!"Codomain '{codName}' not found."
 
-  -- 2. Sorry audit on representation layer
-  let liftTAxioms ← Lean.collectAxioms liftTName
-  if liftTAxioms.contains ``sorryAx then
-    throwError s!"SORRY_IN_REPRESENTATION: '{liftTName}' depends on sorryAx."
+  -- 2. Representation Axiom Audit (fail-closed, no custom axioms, no sorryAx in rep layer)
+  let allowedRepAxioms : List Name := [`propext, `Classical.choice, `Quot.sound]
+  for cName in [domName, codName, liftTName] do
+    let axioms ← Lean.collectAxioms cName
+    for ax in axioms do
+      if !allowedRepAxioms.contains ax then
+        throwError s!"FORBIDDEN_REPRESENTATION_AXIOM: '{cName}' transitively depends on axiom '{ax}'."
 
-  -- 3. Identity Guard check
-  let domType := domDecl.type
-  let codType := codDecl.type
-  -- Check if LiftDom and LiftCod are definitionally identical types
-  let domEqCod ← isDefEq domType codType
+  let allowedBridgeAxioms : List Name := [`propext, `Classical.choice, `Quot.sound, `sorryAx]
+  let bridgeAxioms ← Lean.collectAxioms bridgeName
+  for ax in bridgeAxioms do
+    if !allowedBridgeAxioms.contains ax then
+      throwError s!"FORBIDDEN_BRIDGE_AXIOM: '{bridgeName}' transitively depends on axiom '{ax}'."
+
+  -- 3. Identity Guard (AND semantics: LiftDom = LiftCod AND liftT = id)
+  let domEqCod ← isDefEq (mkConst domName) (mkConst codName)
   if domEqCod then
-    -- Check if liftT is definitionally identity
-    let isId ← try
-      let idFn ← mkAppM ``id #[domType]
-      isDefEq (mkConst liftTName) idFn
-    catch _ =>
-      pure false
+    let idFn ← mkAppOptM ``id #[some (mkConst domName)]
+    let isId ← isDefEq (mkConst liftTName) idFn
     if isId then
       throwError "IDENTITY_GUARD: Representation map is definitionally the identity function on identical domains."
 
-  -- 4. Target Linkage check
+  -- 4. Target Linkage & Sequential Dependent Binder Comparison
   forallTelescope targetDecl.type fun targetVars targetConcl => do
     forallTelescope bridgeDecl.type fun bridgeVars bridgeConcl => do
-      -- Check binder count and types
+      -- Check binder count
       if targetVars.size != bridgeVars.size then
-        throwError s!"EXTRA_HYPOTHESIS: Target has {targetVars.size} binders, bridge has {bridgeVars.size} binders."
+        throwError s!"BINDER_COUNT_MISMATCH: Target has {targetVars.size} binders, bridge has {bridgeVars.size} binders."
 
-      -- Substitute bridge free variables with target free variables
+      -- Check binder types sequentially with dependent substitution
+      for i in [:targetVars.size] do
+        let tVar := targetVars[i]!
+        let bVar := bridgeVars[i]!
+        let tType ← inferType tVar
+        let bType ← inferType bVar
+        let bTypeSubst := bType.replaceFVars (bridgeVars.extract 0 i) (targetVars.extract 0 i)
+        if !(← isDefEq tType bTypeSubst) then
+          throwError s!"BINDER_TYPE_MISMATCH: Binder {i} type mismatch: target expects {tType}, bridge has {bTypeSubst}"
+
+      -- Substitute bridge free variables with target free variables in conclusion
       let bridgeConclSubst := bridgeConcl.replaceFVars bridgeVars targetVars
 
       -- Check that conclusion is an Iff (↔)
@@ -88,4 +104,4 @@ def runCheckBridge (targetName bridgeName liftTName domName codName : Name) : Me
       if !hasConstRef liftedSide liftTName then
         throwError s!"UNLIFTED_BRIDGE: Lifted side does not contain constant '{liftTName}':\n  {liftedSide}"
 
-      IO.println "BRIDGE_VALID: Structure, Identity Guard, and Target Linkage verified."
+      IO.println "CHECK_BRIDGE_SENTINEL_OK"
