@@ -50,6 +50,14 @@ def test_verify_lifted():
     assert "CIRCULAR_LIFT_DEPENDENCY" in res3.stderr or "CIRCULAR_LIFT_DEPENDENCY" in res3.stdout
     print("test_verify_lifted (circularity guard rejects lifted_theorem depending on bridge): PASS")
 
+    # 3b. Transitive circular cheat (lifted_theorem -> helper -> preservation_bridge)
+    trans_cheated = os.path.join(LIFTED_DIR, "transitive_circular_cheat.lean")
+    res3b = subprocess.run([VERIFY_LIFTED_SCRIPT, target, stub, trans_cheated],
+                           capture_output=True, text=True)
+    assert res3b.returncode != 0, f"Expected FAIL for transitive circular cheat, got returncode 0"
+    assert "CIRCULAR_LIFT_DEPENDENCY" in res3b.stderr or "CIRCULAR_LIFT_DEPENDENCY" in res3b.stdout
+    print("test_verify_lifted (transitive circularity guard via helper rejects dependency): PASS")
+
     # 4. Dead bridge direct proof cheat (only proves executor_theorem with dummy have)
     dead = os.path.join(LIFTED_DIR, "dead_bridge_direct_proof.lean")
     res4 = subprocess.run([VERIFY_LIFTED_SCRIPT, target, stub, dead],

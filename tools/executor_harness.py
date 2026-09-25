@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
 tools/executor_harness.py
-Cryptographic execution harness and state machine for representation-lifting-s1 (v0.6).
+Cryptographic execution harness and state machine for representation-lifting-s1 (v0.7).
 Standardizes agent interaction loops across experimental roles:
 - Role S (Representation Search Executor): 3600s wall-clock, max 15 turns
 - Role D (Direct Proof Executor): 10800s wall-clock, max 30 turns
 - Role L (Lifted Proof Executor): 10800s wall-clock, max 30 turns
 
-State Machine & Governance (v0.6):
+State Machine & Governance (v0.7):
 1. Loads frozen parameters from tools/executor_config.json (request_timeout_seconds: 600).
 2. Enforces pinned Lake environment (lakefile.toml, lean-toolchain, lake-manifest.json).
 3. Infrastructure Resiliency & Classification:
@@ -20,21 +20,22 @@ State Machine & Governance (v0.6):
    - Subprocess and API timeouts capped by `remaining`.
    - Expiration sets status to `TIMEOUT_WALLCLOCK`.
 5. Method Mode Machine-Readable Enforcement:
-   - Evaluates machine-readable deny-list (admissibility/<case>.json).
-   - Verifiers enforce zero direct references to prohibited terminal constants in candidate code.
+   - Evaluates machine-readable deny-list (admissibility/<case>.json) with exact and prefix matching.
+   - Verifiers enforce zero references to prohibited terminal constants across all candidate declarations.
 6. Role L Structural Proof Architecture:
    - Role L receives frozen prefix defining LiftDom, LiftCod, liftT, LiftedClaim, and BridgeProp.
    - Role L authors ONLY `preservation_bridge : BridgeProp` and `lifted_theorem : LiftedClaim`.
-   - Non-circularity: `preservation_bridge ∉ Deps(lifted_theorem)` is enforced.
-   - Trusted verifier mechanically synthesizes `executor_theorem`.
+   - Transitive non-circularity: `preservation_bridge ∉ Deps*(lifted_theorem)` is enforced.
+   - Trusted verifier mechanically synthesizes `synthesized_target` and audits kernel axioms.
 7. Truncation Normalization:
    - Flags responses hitting `max_tokens` / `length` as `OUTPUT_TRUNCATED`.
-8. Sequential Multi-Theorem Calibration State Machine (H1):
-   - Supports `run_calibration_family(family_name, model_id)` to execute and measure
-     T1 -> T2 amortization for both Direct and Lifted branches.
+8. Real Cumulative Multi-Theorem Calibration State Machine (H1):
+   - Direct: T1 declarations compiled as immutable frozen prefix + T2 body; W_D(T1+T2) = tokens(D1 + D2).
+   - Lifted: Reuses representation core (LiftDom, LiftCod, liftT, invariant) from T1; T2 receives dedicated
+     LiftedClaim_T2 and BridgeProp_T2; cumulative artifact is S1 + L1 + S2 + L2.
 9. Emits hash-addressed execution receipts.
 
-Part of representation-lifting-s1 experimental protocol (v0.6).
+Part of representation-lifting-s1 experimental protocol (v0.7).
 """
 
 import sys
@@ -115,6 +116,23 @@ def is_stop_reason_truncated(stop_reason: str | None) -> bool:
     if not stop_reason:
         return False
     return stop_reason.lower() in ("max_tokens", "length")
+
+def extract_representation_core(s_code: str) -> str:
+    """
+    Extracts the representation core (LiftDom, LiftCod, liftT, invariant, helpers)
+    from a verified Role S stub, omitting problem-specific LiftedClaim and BridgeProp.
+    """
+    lines = []
+    skip = False
+    for line in s_code.splitlines():
+        if re.match(r'^\s*(?:def|abbrev|theorem|lemma)\s+(?:LiftedClaim|BridgeProp)\b', line):
+            skip = True
+            continue
+        elif skip and re.match(r'^\s*(?:def|abbrev|theorem|lemma)\s+[a-zA-Z0-9_]+', line):
+            skip = False
+        if not skip:
+            lines.append(line)
+    return "\n".join(lines).strip()
 
 def call_model_api_with_resilience(
     model_id: str,
@@ -323,8 +341,9 @@ class ExecutorStateMachine:
 
         # Initial turn prompt
         initial_user_prompt = f"TARGET THEOREM:\n```lean\n{target_content}\n```\n\nADMISSIBILITY MANIFEST:\n{manifest_content}\n"
-        if self.role == "L":
-            initial_user_prompt += f"\nFROZEN REPRESENTATION PREFIX:\n```lean\n{frozen_prefix_content}\n```\n"
+        if self.frozen_prefix_path:
+            label = "FROZEN REPRESENTATION PREFIX" if self.role in ("L", "S") else "FROZEN CUMULATIVE PREFIX"
+            initial_user_prompt += f"\n{label}:\n```lean\n{frozen_prefix_content}\n```\n"
         if self.additional_context_prompt:
             initial_user_prompt += f"\nADDITIONAL CONTEXT / PREVIOUS THEOREMS:\n{self.additional_context_prompt}\n"
 
@@ -370,9 +389,6 @@ class ExecutorStateMachine:
                     self.transcript.append({"event": "no_code_block", "turn": turn, "output_truncated": last_was_truncated})
                     continue
 
-                with open(candidate_file, "w", encoding="utf-8") as f:
-                    f.write(code)
-
                 candidate_hash = sha256_text(code)
                 self.transcript.append({
                     "event": "candidate_authored",
@@ -387,6 +403,11 @@ class ExecutorStateMachine:
                 proc_timeout = min(300, max(1, int(deadline - time.time())))
 
                 if self.role == "S":
+                    # If representation core prefix is present, combine it with candidate code for check_bridge
+                    s_to_check = (frozen_prefix_content + "\n\n" + code) if self.frozen_prefix_path else code
+                    with open(candidate_file, "w", encoding="utf-8") as f:
+                        f.write(s_to_check)
+
                     try:
                         cmd = [sys.executable, CHECK_BRIDGE_SCRIPT, self.target_path, candidate_file]
                         if self.admissibility_path:
@@ -399,10 +420,17 @@ class ExecutorStateMachine:
                         ver_msg = "TIMEOUT: Lean checker exceeded turn time limit."
 
                 elif self.role == "D":
+                    with open(candidate_file, "w", encoding="utf-8") as f:
+                        f.write(code)
+
                     try:
                         cmd = [VERIFY_PROOF_SCRIPT, self.target_path, candidate_file, "executor_theorem"]
                         if self.admissibility_path:
                             cmd.append(self.admissibility_path)
+                        elif self.frozen_prefix_path:
+                            cmd.append("")
+                        if self.frozen_prefix_path:
+                            cmd.append(self.frozen_prefix_path)
                         res = subprocess.run(cmd, capture_output=True, text=True, timeout=proc_timeout)
                         ver_ok = (res.returncode == 0) and ("VERIFICATION_SUCCESS" in res.stdout)
                         ver_msg = (res.stdout + "\n" + res.stderr).strip()
@@ -411,6 +439,9 @@ class ExecutorStateMachine:
                         ver_msg = "TIMEOUT: Lean verifier exceeded turn time limit."
 
                 elif self.role == "L":
+                    with open(candidate_file, "w", encoding="utf-8") as f:
+                        f.write(code)
+
                     try:
                         cmd = [VERIFY_LIFTED_SCRIPT, self.target_path, self.frozen_prefix_path, candidate_file]
                         if self.admissibility_path:
@@ -426,11 +457,14 @@ class ExecutorStateMachine:
                     final_status = "COMPLETE"
                     verified_code = code
                     if self.role == "L":
-                        # Bound metric: Full assembled artifact (frozen prefix + proved bridge + lifted theorem)
+                        # Full assembled artifact (frozen prefix + proved bridge + lifted theorem)
                         assembled = frozen_prefix_content + "\n\n" + code
                         verified_footprint = count_tokens(assembled)
+                    elif self.role == "D":
+                        # Cumulative artifact if frozen prefix exists
+                        assembled = (frozen_prefix_content + "\n\n" + code) if self.frozen_prefix_path else code
+                        verified_footprint = count_tokens(assembled)
                     else:
-                        # Role D: W_D = W(all newly authored candidate declarations required for proof)
                         verified_footprint = count_tokens(code)
 
                     self.transcript.append({
@@ -455,7 +489,7 @@ class ExecutorStateMachine:
 
         elapsed = time.time() - start_time
         self.receipt = {
-            "schema_version": "v0.6",
+            "schema_version": "v0.7",
             "receipt_type": "hash_addressed_execution_receipt",
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
             "role": self.role,
@@ -487,12 +521,16 @@ def run_calibration_family(
     Executes the sequential multi-theorem calibration state machine (H1):
     1. Direct Branch:
        - Run Role D on T1. Record W_D(T1).
-       - Run Role D on T2, providing T1 proof code in context.
-       - Record W_D(T1 + T2). Marginal cost: Delta_D^(2) = W_D(T1+T2) - W_D(T1).
+       - Compile T1 proof code as frozen prefix for T2.
+       - Run Role D on T2. Record cumulative W_D(T1 + T2).
+       - Marginal cost: Delta_D^(2) = W_D(T1+T2) - W_D(T1).
     2. Lifted Branch:
        - Run Role S on T1 -> representation prefix S1.
-       - Run Role L on T1 with S1 prefix -> Record W_L(T1) = W(S1 + L1).
-       - Run Role L on T2 reusing representation space -> Record W_L(T1 + T2).
+       - Run Role L on T1 with S1 prefix -> Record W_L(T1) = tokens(S1 + L1).
+       - Extract representation core (LiftDom, LiftCod, liftT, invariant).
+       - Run Role S on T2 with frozen representation core -> S2 (LiftedClaim_T2, BridgeProp_T2).
+       - Run Role L on T2 with reused representation core + L1 helpers + S2 -> L2.
+       - Record cumulative W_L(T1 + T2) = tokens(S1 + L1 + S2 + L2).
        - Marginal cost: Delta_L^(2) = W_L(T1+T2) - W_L(T1).
     3. Evaluation of H1 Amortization Dividend:
        Check: Delta_L^(2) <= 0.50 * Delta_D^(2).
@@ -506,7 +544,7 @@ def run_calibration_family(
         raise FileNotFoundError(f"Calibration targets for family '{family_name}' not found.")
 
     calib_report = {
-        "schema_version": "v0.6",
+        "schema_version": "v0.7",
         "family": family_name,
         "model_id": model_id,
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
@@ -516,25 +554,45 @@ def run_calibration_family(
         "ratio_delta_l_over_delta_d": None
     }
 
+    import tempfile
+
     # --- DIRECT BRANCH ---
     sm_d1 = ExecutorStateMachine("D", t1_path, manifest_path, model_id, admissibility_path=adm_path, mock_generator=mock_generator)
     r_d1 = sm_d1.run()
     calib_report["direct"]["t1_status"] = r_d1["final_status"]
     calib_report["direct"]["w_d_t1"] = r_d1["verified_footprint_tokens"]
-
     d1_code = r_d1.get("verified_code") or ""
-    d_ctx = f"PREVIOUSLY PROVED T1 THEOREM & HELPERS:\n```lean\n{d1_code}\n```\nYou may reuse these definitions/lemmas. Provide the complete code for T2 as `executor_theorem`."
 
-    sm_d2 = ExecutorStateMachine("D", t2_path, manifest_path, model_id, admissibility_path=adm_path, mock_generator=mock_generator, additional_context_prompt=d_ctx)
-    r_d2 = sm_d2.run()
-    calib_report["direct"]["t2_status"] = r_d2["final_status"]
-    calib_report["direct"]["w_d_t1_t2"] = r_d2["verified_footprint_tokens"]
+    if r_d1["final_status"] == "COMPLETE":
+        # Rename executor_theorem -> executor_theorem_t1 in frozen prefix to prevent Lean name collision
+        d1_prefix = re.sub(r'\b(theorem|def|lemma)\s+executor_theorem\b', r'\1 executor_theorem_t1', d1_code)
+        with tempfile.NamedTemporaryFile("w", suffix=".lean", delete=False) as f:
+            f.write(d1_prefix)
+            d1_prefix_file = f.name
+        try:
+            d_ctx = (
+                "FROZEN CUMULATIVE PREFIX (T1 theorem & helpers):\n"
+                "The previous T1 proof and its helpers are already loaded in the environment as `executor_theorem_t1`.\n"
+                "You may call or reuse them. Author your complete proof for T2 as `executor_theorem`."
+            )
+            sm_d2 = ExecutorStateMachine("D", t2_path, manifest_path, model_id, frozen_prefix_path=d1_prefix_file, admissibility_path=adm_path, mock_generator=mock_generator, additional_context_prompt=d_ctx)
+            r_d2 = sm_d2.run()
+            calib_report["direct"]["t2_status"] = r_d2["final_status"]
+            calib_report["direct"]["w_d_t1_t2"] = r_d2["verified_footprint_tokens"]
 
-    if r_d1["final_status"] == "COMPLETE" and r_d2["final_status"] == "COMPLETE":
-        delta_d = max(0, r_d2["verified_footprint_tokens"] - r_d1["verified_footprint_tokens"])
-        calib_report["direct"]["delta_d_2"] = delta_d
+            if r_d2["final_status"] == "COMPLETE":
+                delta_d = max(0, r_d2["verified_footprint_tokens"] - r_d1["verified_footprint_tokens"])
+                calib_report["direct"]["delta_d_2"] = delta_d
+            else:
+                delta_d = None
+                calib_report["direct"]["delta_d_2"] = None
+        finally:
+            if os.path.exists(d1_prefix_file):
+                os.remove(d1_prefix_file)
     else:
         delta_d = None
+        calib_report["direct"]["t2_status"] = "SKIPPED_D1_FAILED"
+        calib_report["direct"]["w_d_t1_t2"] = None
         calib_report["direct"]["delta_d_2"] = None
 
     # --- LIFTED BRANCH ---
@@ -543,31 +601,99 @@ def run_calibration_family(
     calib_report["lifted"]["s1_status"] = r_s1["final_status"]
     s1_code = r_s1.get("verified_code") or ""
 
-    import tempfile
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        s1_file = os.path.join(tmp_dir, "s1_prefix.lean")
-        with open(s1_file, "w", encoding="utf-8") as f:
+    if r_s1["final_status"] == "COMPLETE":
+        with tempfile.NamedTemporaryFile("w", suffix=".lean", delete=False) as f:
             f.write(s1_code)
+            s1_file = f.name
+        try:
+            sm_l1 = ExecutorStateMachine("L", t1_path, manifest_path, model_id, frozen_prefix_path=s1_file, admissibility_path=adm_path, mock_generator=mock_generator)
+            r_l1 = sm_l1.run()
+            calib_report["lifted"]["l1_status"] = r_l1["final_status"]
+            calib_report["lifted"]["w_l_t1"] = r_l1["verified_footprint_tokens"]
+            l1_code = r_l1.get("verified_code") or ""
 
-        sm_l1 = ExecutorStateMachine("L", t1_path, manifest_path, model_id, frozen_prefix_path=s1_file, admissibility_path=adm_path, mock_generator=mock_generator)
-        r_l1 = sm_l1.run()
-        calib_report["lifted"]["l1_status"] = r_l1["final_status"]
-        calib_report["lifted"]["w_l_t1"] = r_l1["verified_footprint_tokens"]
-        l1_code = r_l1.get("verified_code") or ""
+            if r_l1["final_status"] == "COMPLETE":
+                # Reuse ONLY representation core from S1
+                s_core = extract_representation_core(s1_code)
+                with tempfile.NamedTemporaryFile("w", suffix=".lean", delete=False) as f:
+                    f.write(s_core)
+                    s_core_file = f.name
+                try:
+                    s2_ctx = (
+                        "FROZEN REPRESENTATION CORE:\n"
+                        "The representation domain, codomain, map, and invariants from T1 are frozen:\n"
+                        f"```lean\n{s_core}\n```\n"
+                        "Do NOT redefine LiftDom, LiftCod, or liftT. Define new `LiftedClaim` and `BridgeProp` for T2."
+                    )
+                    sm_s2 = ExecutorStateMachine("S", t2_path, manifest_path, model_id, frozen_prefix_path=s_core_file, admissibility_path=adm_path, mock_generator=mock_generator, additional_context_prompt=s2_ctx)
+                    r_s2 = sm_s2.run()
+                    calib_report["lifted"]["s2_status"] = r_s2["final_status"]
+                    s2_code = r_s2.get("verified_code") or ""
 
-        # For T2 in lifted mode, reuse representation prefix
-        l_ctx = f"PREVIOUSLY PROVED LIFTED HELPERS FROM T1:\n```lean\n{l1_code}\n```"
-        sm_l2 = ExecutorStateMachine("L", t2_path, manifest_path, model_id, frozen_prefix_path=s1_file, admissibility_path=adm_path, mock_generator=mock_generator, additional_context_prompt=l_ctx)
-        r_l2 = sm_l2.run()
-        calib_report["lifted"]["l2_status"] = r_l2["final_status"]
-        calib_report["lifted"]["w_l_t1_t2"] = r_l2["verified_footprint_tokens"]
+                    if r_s2["final_status"] == "COMPLETE":
+                        # Rename S1 and L1 T1-specific specifications and proofs to _t1
+                        s1_renamed = re.sub(r'\bBridgeProp\b', 'BridgeProp_T1', s1_code)
+                        s1_renamed = re.sub(r'\bLiftedClaim\b', 'LiftedClaim_T1', s1_renamed)
 
-        if r_l1["final_status"] == "COMPLETE" and r_l2["final_status"] == "COMPLETE":
-            delta_l = max(0, r_l2["verified_footprint_tokens"] - r_l1["verified_footprint_tokens"])
-            calib_report["lifted"]["delta_l_2"] = delta_l
-        else:
-            delta_l = None
-            calib_report["lifted"]["delta_l_2"] = None
+                        l1_renamed = re.sub(r'\bBridgeProp\b', 'BridgeProp_T1', l1_code)
+                        l1_renamed = re.sub(r'\bLiftedClaim\b', 'LiftedClaim_T1', l1_renamed)
+                        l1_renamed = re.sub(r'\bpreservation_bridge\b', 'preservation_bridge_t1', l1_renamed)
+                        l1_renamed = re.sub(r'\blifted_theorem\b', 'lifted_theorem_t1', l1_renamed)
+                        
+                        # Cumulative prefix for L2: S1 + L1 (renamed) + S2 specification for T2
+                        l2_prefix = s1_renamed + "\n\n" + l1_renamed + "\n\n" + s2_code
+                        with tempfile.NamedTemporaryFile("w", suffix=".lean", delete=False) as f:
+                            f.write(l2_prefix)
+                            l2_prefix_file = f.name
+                        try:
+                            l2_ctx = (
+                                "REUSED REPRESENTATION INFRASTRUCTURE (from T1):\n"
+                                "The representation core and T1 lemmas are loaded in the environment:\n"
+                                f"```lean\n{l1_renamed}\n```\n"
+                                "Prove `preservation_bridge` and `lifted_theorem` for T2."
+                            )
+                            sm_l2 = ExecutorStateMachine("L", t2_path, manifest_path, model_id, frozen_prefix_path=l2_prefix_file, admissibility_path=adm_path, mock_generator=mock_generator, additional_context_prompt=l2_ctx)
+                            r_l2 = sm_l2.run()
+                            calib_report["lifted"]["l2_status"] = r_l2["final_status"]
+
+                            if r_l2["final_status"] == "COMPLETE":
+                                l2_code = r_l2.get("verified_code") or ""
+                                cum_l_code = s1_code + "\n\n" + l1_code + "\n\n" + s2_code + "\n\n" + l2_code
+                                w_l_t1_t2 = count_tokens(cum_l_code)
+                                calib_report["lifted"]["w_l_t1_t2"] = w_l_t1_t2
+                                delta_l = max(0, w_l_t1_t2 - r_l1["verified_footprint_tokens"])
+                                calib_report["lifted"]["delta_l_2"] = delta_l
+                            else:
+                                delta_l = None
+                                calib_report["lifted"]["w_l_t1_t2"] = None
+                                calib_report["lifted"]["delta_l_2"] = None
+                        finally:
+                            if os.path.exists(l2_prefix_file):
+                                os.remove(l2_prefix_file)
+                    else:
+                        delta_l = None
+                        calib_report["lifted"]["l2_status"] = "SKIPPED_S2_FAILED"
+                        calib_report["lifted"]["w_l_t1_t2"] = None
+                        calib_report["lifted"]["delta_l_2"] = None
+                finally:
+                    if os.path.exists(s_core_file):
+                        os.remove(s_core_file)
+            else:
+                delta_l = None
+                calib_report["lifted"]["s2_status"] = "SKIPPED_L1_FAILED"
+                calib_report["lifted"]["l2_status"] = "SKIPPED_L1_FAILED"
+                calib_report["lifted"]["w_l_t1_t2"] = None
+                calib_report["lifted"]["delta_l_2"] = None
+        finally:
+            if os.path.exists(s1_file):
+                os.remove(s1_file)
+    else:
+        delta_l = None
+        calib_report["lifted"]["l1_status"] = "SKIPPED_S1_FAILED"
+        calib_report["lifted"]["s2_status"] = "SKIPPED_S1_FAILED"
+        calib_report["lifted"]["l2_status"] = "SKIPPED_S1_FAILED"
+        calib_report["lifted"]["w_l_t1_t2"] = None
+        calib_report["lifted"]["delta_l_2"] = None
 
     # H1 Dividend Evaluation: Delta_L^(2) <= 0.50 * Delta_D^(2)
     if delta_d is not None and delta_l is not None and delta_d > 0:

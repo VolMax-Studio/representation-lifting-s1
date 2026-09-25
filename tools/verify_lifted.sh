@@ -3,15 +3,16 @@
 # Verification harness for Role L (Lifted Proof Executor):
 # 1. Enforces pinned Lake environment (lean-toolchain, lakefile.toml, lake-manifest.json).
 # 2. Scans executor code for escape tokens (sorry, admit, native_decide, axiom).
-# 3. Combines frozen representation prefix with executor proof.
+# 3. Combines frozen representation prefix with executor proof inside namespace CandidateExecutor.
 # 4. Invokes tools/VerifyLifted.lean to verify:
 #    - type(preservation_bridge) ≡ BridgeProp
 #    - type(lifted_theorem) ≡ LiftedClaim
 #    - Zero sorryAx and zero custom axioms in both proofs
-#    - Non-circularity: preservation_bridge ∉ Deps(lifted_theorem)
-#    - Method Mode deny-list enforcement
+#    - Transitive Non-circularity: preservation_bridge ∉ Deps*(lifted_theorem)
+#    - Method Mode deny-list enforcement (exact and prefix) across all candidate declarations
+#    - Actual mechanical synthesis of original executor theorem with kernel axiom audit
 # 5. Enforces exit code 0 and exact sentinel: VERIFY_LIFTED_SENTINEL_OK.
-# Part of representation-lifting-s1 experimental protocol (v0.6).
+# Part of representation-lifting-s1 experimental protocol (v0.7).
 
 set -euo pipefail
 
@@ -49,16 +50,19 @@ EXTRACT_SCRIPT='
 import sys, re
 imports = ["import Lean"]
 for p in sys.argv[1:-1]:
-    with open(p, "r", encoding="utf-8") as f:
-        for line in f:
-            if re.match(r"^\s*import\b", line):
-                imp = line.strip()
-                if imp not in imports:
-                    imports.append(imp)
+    if p and p != "":
+        with open(p, "r", encoding="utf-8") as f:
+            for line in f:
+                if re.match(r"^\s*import\b", line):
+                    imp = line.strip()
+                    if imp not in imports:
+                        imports.append(imp)
 with open(sys.argv[-1], "w", encoding="utf-8") as out:
     for imp in imports:
         out.write(imp + "\n")
 '
+
+VERIFY_LEAN="$TMP_DIR/VerifyLiftedHarness.lean"
 
 python3 -c "$EXTRACT_SCRIPT" "$FROZEN_TARGET_FILE" "$FROZEN_STUB_PREFIX" "$EXECUTOR_LEAN_FILE" "$SCRIPT_DIR/VerifyLifted.lean" "$TMP_DIR/imports.lean"
 
@@ -75,8 +79,6 @@ print("[" + ", ".join(lean_items) + "]")
 ' "$ADMISSIBILITY_JSON")
 fi
 
-VERIFY_LEAN="$TMP_DIR/VerifyLiftedHarness.lean"
-
 cat "$TMP_DIR/imports.lean" > "$VERIFY_LEAN"
 echo "" >> "$VERIFY_LEAN"
 echo "-- Core VerifyLifted definitions" >> "$VERIFY_LEAN"
@@ -85,25 +87,17 @@ echo "" >> "$VERIFY_LEAN"
 echo "-- Target statement" >> "$VERIFY_LEAN"
 grep -vE '^\s*import\b' "$FROZEN_TARGET_FILE" >> "$VERIFY_LEAN"
 echo "" >> "$VERIFY_LEAN"
-echo "-- Frozen Representation Prefix (from Role S)" >> "$VERIFY_LEAN"
+echo "-- Frozen Representation Prefix (from Role S) in candidate namespace" >> "$VERIFY_LEAN"
+echo "namespace CandidateExecutor" >> "$VERIFY_LEAN"
 grep -vE '^\s*import\b' "$FROZEN_STUB_PREFIX" >> "$VERIFY_LEAN"
+echo "end CandidateExecutor" >> "$VERIFY_LEAN"
 echo "" >> "$VERIFY_LEAN"
-# Extract candidate-authored declaration names (theorems, lemmas, defs, abbrevs)
-CANDIDATE_DECLS=$(python3 -c '
-import sys, re
-names = []
-with open(sys.argv[1], "r", encoding="utf-8") as f:
-    for line in f:
-        m = re.match(r"^\s*(?:theorem|lemma|def|abbrev)\s+([a-zA-Z0-9_]+)", line)
-        if m:
-            names.append(f"`{m.group(1)}")
-print("[" + ", ".join(names) + "]")
-' "$EXECUTOR_LEAN_FILE")
-
-echo "-- Executor Declarations (from Role L)" >> "$VERIFY_LEAN"
+echo "-- Executor Declarations (from Role L) in candidate namespace" >> "$VERIFY_LEAN"
+echo "namespace CandidateExecutor" >> "$VERIFY_LEAN"
 grep -vE '^\s*import\b' "$EXECUTOR_LEAN_FILE" >> "$VERIFY_LEAN"
+echo "end CandidateExecutor" >> "$VERIFY_LEAN"
 echo "" >> "$VERIFY_LEAN"
-echo "#eval! runVerifyLifted \`frozen_target \`BridgeProp \`LiftedClaim \`preservation_bridge \`lifted_theorem $CANDIDATE_DECLS $PROHIBITED_LEAN_LIST" >> "$VERIFY_LEAN"
+echo "#eval! runVerifyLifted \`frozen_target \`BridgeProp \`LiftedClaim \`preservation_bridge \`lifted_theorem $PROHIBITED_LEAN_LIST" >> "$VERIFY_LEAN"
 
 # 4. Execute verification strictly via pinned lake env lean
 OUTPUT="$TMP_DIR/verify_output.txt"

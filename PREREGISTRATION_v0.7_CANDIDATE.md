@@ -1,5 +1,5 @@
-# representation-lifting-s1: PREREGISTRATION v0.6 CANDIDATE (SUPERSEDED)
-**Status:** SUPERSEDED BY v0.7 CANDIDATE (see PREREGISTRATION_v0.7_CANDIDATE.md)  
+# representation-lifting-s1: PREREGISTRATION v0.7 CANDIDATE
+**Status:** READY FOR CLAUDE GATE / HUMAN RATIFICATION (SUPERSEDES v0.1 `254e06d8…`, v0.2 `4fdc0bf4…`, v0.3 `da532b0e…`, v0.4 `bdc5c76e…`, v0.5 `64e6cde8…`, AND v0.6 `ecb31e42…`)  
 **Author / Principal Investigator:** Ivan Nestorov  
 **Target Toolchain:** Lean 4 (v4.34.0) / Mathlib v4.34.0 (commit `5ed2965256430c3649e86755f9576b54eca72435`)  
 **Repository Location:** `PORTFOLIO/representation-lifting-s1/`  
@@ -49,16 +49,18 @@ The study consists of three strictly separated arms:
 ### 2.1 Calibration-Family Arm (Symmetric Amortization & Marginal Cost)
 Evaluates whether establishing an explicit representation layer ($T: \text{LiftDom} \to \text{LiftCod}$) and preservation bridge incurs an initial setup footprint penalty on theorem $T_1$, but yields a significant marginal footprint reduction on a subsequent related theorem $T_2$ from the same family.
 
-**Symmetric Execution Rule:**  
-Both branches ($L$ and $D$) execute $T_2$ sequentially in the **same source context** following their verified $T_1$ proof. Both branches have identical rights to reuse their own definitions, intermediate lemmas, and infrastructure established during $T_1$.
+**Real Cumulative Multi-Theorem Execution Rule (v0.7):**  
+Both branches ($L$ and $D$) execute $T_2$ as a **real cumulative compilation artifact**:
+1. **Direct Branch:** $D_1$ declarations are compiled as an immutable frozen module prefix prior to $D_2$ elaboration. $W_D(T_1 + T_2) = \text{tokens}(D_1 + D_2)$. Marginal cost $\Delta_D^{(2)} = W_D(T_1 + T_2) - W_D(T_1)$.
+2. **Lifted Branch:** $T_2$ reuses the representation core ($\text{LiftDom}, \text{LiftCod}, \text{liftT}, \text{invariant}$) and proved representation lemmas from $T_1$, but receives a fresh, independently verified specification ($\text{LiftedClaim}_{T2}, \text{BridgeProp}_{T2}$) linked to $T_2$'s frozen target. Cumulative artifact is $S_1 + L_1 + S_2 + L_2$. Marginal cost $\Delta_L^{(2)} = W_L(T_1 + T_2) - W_L(T_1)$.
 
 **Frozen Lean Calibration Statements (`calibration/`):**
 
 1. **Fibonacci Family (`calibration/fibonacci_t1.lean`, `calibration/fibonacci_t2.lean`):**
-   - $T_1$ (Cassini identity):
+   - $T_1$ (Cassini identity, mathematically well-posed for $n \ge 1$):
      ```lean
      import Mathlib.Data.Int.Fib.Lemmas
-     theorem frozen_target (n : ℕ) :
+     theorem frozen_target (n : ℕ) (hn : 1 ≤ n) :
          (Nat.fib (n + 1) : ℤ) * (Nat.fib (n - 1) : ℤ) - (Nat.fib n : ℤ)^2 = (-1)^n
      ```
    - $T_2$ (Additive formula):
@@ -130,13 +132,14 @@ Evaluates whether a representation-first search can discover a valid representat
 Method Mode is the **primary experimental condition**. It evaluates the autonomous capacity of the agent to discover and formalize representations and proofs from first principles, rather than querying terminal pre-packaged Mathlib theorems that trivialize the target.
 
 1. **Machine-Readable Deny-Lists (`admissibility/<case>.json`):**
-   - Explicit JSON declarations specifying fully qualified constant names forbidden from direct reference:
-     - `admissibility/fibonacci.json`: Prohibits `Int.fib_succ_mul_fib_pred_sub_fib_sq`, `Nat.fib_gcd`.
-     - `admissibility/pell.json`: Prohibits `Pell.Solution₁`.
+   - Explicit JSON declarations specifying fully qualified constant names forbidden from reference:
+     - `admissibility/fibonacci.json`: Prohibits `Int.fib_succ_mul_fib_pred_sub_fib_sq`, `Nat.fib_add`, `Nat.fib_add_two`, `Nat.fib_gcd`.
+     - `admissibility/pell.json`: Prohibits `Pell.Solution₁` and all child projection/multiplication lemmas (`Pell.Solution₁.x_mul`, `y_mul`, `mul`, `pow`, `x_pow`, `y_pow`, `x_pow_pos`).
      - `admissibility/roots_of_unity.json`: Prohibits `IsPrimitiveRoot.geom_sum_eq_zero`.
-2. **Direct Constant Scanning Policy (No False Rejections):**
-   - The Lean verifier (`checkDirectProhibited`) audits all newly authored candidate declarations (theorems, helper lemmas, definitions) via `foldConsts`.
-   - **Scanning Scope:** Strict direct reference inspection on candidate declarations only. It does **not** scan transitively into Mathlib internals, preventing false rejections when standard Mathlib lemmas internally use a prohibited lemma.
+2. **Lean-Native Declaration Discovery & Prefix Deny Scanning (v0.7):**
+   - Candidate submissions are encapsulated in `namespace CandidateExecutor`.
+   - The Lean environment (`getCandidateDecls`) discovers **all** authored candidate declarations (theorems, helper lemmas, defs, noncomputable, and private definitions) natively via environment reflection, eliminating brittle Python regex matching.
+   - `isProhibited` performs exact and prefix name checks ($p = c \lor p.\text{isPrefixOf}(c)$).
 3. **Fail-Closed Violation:** Any direct reference to a prohibited constant triggers immediate Lean meta-checker rejection with `FORBIDDEN_METHOD_MODE_CONSTANT`.
 
 ### 3.2 Secondary Regime: Ecosystem Mode (Sensitivity Baseline)
@@ -175,26 +178,30 @@ For each blind problem:
    ```
 3. **Pure Lean Meta-Checker Verification (`tools/CheckBridge.lean`):**
    - **Environment Requirement:** Verified strictly using the checked-in Lake project via `lake env lean`.
-   - **Representation Axiom Whitelist:** Transitive axioms $\subseteq \{\texttt{propext}, \texttt{Classical.choice}, \texttt{Quot.sound}\}$ (zero `sorryAx`).
+   - **Comprehensive Representation Axiom Audit:** All candidate declarations in environment must depend ONLY on $\{\texttt{propext}, \texttt{Classical.choice}, \texttt{Quot.sound}\}$ (zero `sorryAx` anywhere).
    - **Identity Guard (AND semantics):**
      $$\text{isDefEq}(\text{LiftDom}, \text{LiftCod}) \land \text{isDefEq}(\text{liftT}, @\text{id LiftDom})$$
      If both hold $\implies$ fails with **`LIFT-NOT-FOUND / IDENTITY_GUARD`**.
-   - **Linkage Verification:** Asserts `BridgeProp` connects target conclusion to `LiftedClaim` conclusion, and contains `liftT`.
+   - **Linkage Verification:** Asserts `BridgeProp` conclusion is a non-tautological equivalence connecting target conclusion to `LiftedClaim` conclusion, and contains `liftT`.
    - **Sentinel Enforcement:** Requires exit code 0 and exact terminal line `CHECK_BRIDGE_SENTINEL_OK`.
 
-### 4.2 Structural Lift Architecture (Role L, `tools/VerifyLifted.lean` & `tools/verify_lifted.sh`)
-To eliminate heuristic bypasses (such as `have _ := preservation_bridge` inserted into direct proofs), v0.6 enforces a strict **structural lift architecture**:
+### 4.2 Structural Lift Architecture & Actual Target Synthesis (Role L, `tools/VerifyLifted.lean` & `tools/verify_lifted.sh`)
+v0.7 enforces **actual mechanical target synthesis** and **transitive non-circularity**:
 1. **Role S Frozen Prefix:** Role S declares `LiftDom`, `LiftCod`, `liftT`, `LiftedClaim : Prop`, and `BridgeProp : Prop`.
 2. **Role L Scope:** Role L authors **ONLY**:
    - `preservation_bridge : BridgeProp`
    - `lifted_theorem : LiftedClaim`
-3. **Mechanical Synthesis of Target Theorem:**
+3. **Actual Mechanical Synthesis of Original Target Theorem (v0.7):**
    - The executor does **not** author `executor_theorem`.
-   - The trusted verifier / Lean harness synthesizes `executor_theorem` directly from the two components:
-     $$\texttt{executor\_theorem} := \lambda \vec{x} \implies (\texttt{preservation\_bridge}\ \vec{x}).\text{mpr}\ (\texttt{lifted\_theorem}\ \vec{x})$$
-4. **Non-Circularity Provenance Audit:**
-   - Asserts: $\texttt{preservation\_bridge} \notin \text{Deps}(\texttt{lifted\_theorem})$.
-   - The lifted claim must be proved autonomously within the representation domain, not circularly through the bridge.
+   - The trusted verifier (`VerifyLifted.lean`) detects the orientation of `BridgeProp` under the target telescope (`Iff.mpr` vs `Iff.mp`).
+   - The verifier mechanically constructs the proof term:
+     $$\texttt{fullProof} := \lambda \vec{x} \implies (\texttt{preservation\_bridge}\ \vec{x}).\text{mpr/.mp}\ (\texttt{lifted\_theorem}\ \vec{x})$$
+   - Asserts $\text{type}(\texttt{fullProof}) \equiv_{\text{def}} \text{type}(\texttt{frozen\_target})$.
+   - Adds $\texttt{CandidateExecutor.synthesized\_target}$ directly into the environment and performs a strict kernel axiom audit ($A \subseteq \{\texttt{propext}, \texttt{Classical.choice}, \texttt{Quot.sound}\}$, zero `sorryAx`).
+4. **Transitive Module-Local Non-Circularity Audit (v0.7):**
+   - Recursively traverses all local candidate-authored declarations in the dependency closure of `lifted_theorem` using a `NameSet`.
+   - Asserts: $\texttt{preservation\_bridge} \notin \text{Deps}^*(\texttt{lifted\_theorem})$.
+   - Rejects any direct or indirect bypass (e.g. `helper := preservation_bridge`, `lifted_theorem := helper`) with `CIRCULAR_LIFT_DEPENDENCY`.
 5. **Sentinel Enforcement:** Requires exit code 0 and exact sentinel `VERIFY_LIFTED_SENTINEL_OK`.
 
 ---
@@ -233,13 +240,13 @@ $$\Delta W_{\text{token}} = W_L - W_D$$
 Evaluated via `run_calibration_family(family_name, model_id)` in `tools/executor_harness.py`:
 1. **Direct Branch:**
    - Role D proves $T_1 \implies W_D(T_1)$.
-   - Role D proves $T_2$ in the same context, with $D_1$ provided in prompt $\implies W_D(T_1 + T_2)$.
-   - Marginal direct cost: $\Delta_D^{(2)} = W_D(T_1 + T_2) - W_D(T_1)$.
+   - $D_1$ is compiled as an immutable frozen module prefix alongside $D_2 \implies W_D(T_1 + T_2) = \text{tokens}(D_1 + D_2)$.
+   - Marginal direct cost: $\Delta_D^{(2)} = W_D(T_1 + T_2) - W_D(T_1) \ge 0$.
 2. **Lifted Branch:**
    - Role S discovers representation on $T_1 \implies S_1$.
    - Role L proves $T_1$ with $S_1$ prefix $\implies W_L(T_1) = W(S_1 + L_1)$.
-   - Role L proves $T_2$ reusing the representation space $(LiftDom, LiftCod, liftT) \implies W_L(T_1 + T_2)$.
-   - Marginal lifted cost: $\Delta_L^{(2)} = W_L(T_1 + T_2) - W_L(T_1)$.
+   - Representation core is frozen; Role S defines fresh specification $S_2$ for $T_2$; Role L proves $T_2$ with $S_{\text{core}} + L_{1\text{ helpers}} + S_2 \implies W_L(T_1 + T_2) = \text{tokens}(S_1 + L_1 + S_2 + L_2)$.
+   - Marginal lifted cost: $\Delta_L^{(2)} = W_L(T_1 + T_2) - W_L(T_1) \ge 0$.
 3. **Primary Amortization Hypothesis (H1):**
    - **Marginal Dividend:**
      $$\Delta_L^{(2)} \le 0.50 \times \Delta_D^{(2)}$$
@@ -274,10 +281,14 @@ Evaluated according to the pre-frozen Control Outcome Matrix in Section 2.3.
 - **Amendment 0.2 $\to$ 0.3:** Replaced text regex checking with pure Lean 4 kernel meta-checkers (`CheckBridge.lean`, `VerifyTarget.lean`); formalized discrete Role S and live API smoke test.
 - **Amendment 0.3 $\to$ 0.4:** Corrected Identity Guard value-level definitional equality; added sequential dependent binder type matching; added representation layer axiom whitelist.
 - **Amendment 0.4 $\to$ 0.5:** Formally recorded Identity Guard amendment to AND semantics; created `VerifyLifted.lean` with transitive constant dependency; bound $W_L$ to full assembled artifact; checked in pinned Lake manifest; established infrastructure resilience rules.
-- **Amendment 0.5 $\to$ 0.6 (Current):**
-  - **Method Mode Deny-List Enforcement:** Replaced prompt-only instructions with machine-readable `admissibility/<case>.json` deny-lists. Meta-checkers inspect direct constant references in all newly authored candidate declarations (`checkDirectProhibited` via `foldConsts`) without scanning transitively into Mathlib internals.
-  - **Restoration of Primary Method vs. Secondary Ecosystem Modes:** Explicitly formalized the primary Method Mode regime and secondary Ecosystem sensitivity line.
-  - **Structural Lift Architecture:** Replaced fragile `LIFT_NOT_USED` transitive dependency inspection with structural decomposition: Role S defines `LiftedClaim : Prop` and `BridgeProp : Prop`; Role L authors only `preservation_bridge : BridgeProp` and `lifted_theorem : LiftedClaim`; trusted verifier mechanically synthesizes `executor_theorem`; non-circularity is strictly enforced ($\texttt{preservation\_bridge} \notin \text{Deps}(\texttt{lifted\_theorem})$).
-  - **Sequential Multi-Theorem Calibration State Machine (H1):** Implemented `run_calibration_family` in `tools/executor_harness.py` to systematically execute and measure $T_1 \to T_2$ sequential amortization and evaluate the H1 dividend ($\Delta_L^{(2)} \le 0.50 \times \Delta_D^{(2)}$).
-  - **Metric Definition Alignment:** Aligned textual definition of $W_D$ to match implementation: $W_D = W(\text{all newly authored candidate declarations required for proof})$.
-  - **API Timeout & Truncation Normalization:** Increased per-request timeout to 600s in `tools/executor_config.json` to eliminate length bias against Role L. Normalized truncation to status `OUTPUT_TRUNCATED`.
+- **Amendment 0.5 $\to$ 0.6:**
+  - Method Mode Deny-List Enforcement: machine-readable `admissibility/<case>.json` deny-lists.
+  - Restoration of Primary Method vs. Secondary Ecosystem Modes.
+  - Structural Lift Architecture: Role S defines specification, Role L authors proofs, verifier checks components.
+  - Sequential Multi-Theorem Calibration State Machine (H1): initial `run_calibration_family`.
+- **Amendment 0.6 $\to$ 0.7 (Current):**
+  - **Actual Mechanical Target Synthesis:** `VerifyLifted.lean` mechanically constructs `synthesized_target := fun xs => (preservation_bridge xs).mpr/.mp (lifted_theorem xs)` with automatic direction detection under the target telescope, validates `isDefEq` against `frozen_target.type`, adds the synthesized theorem declaration to the environment, and performs a strict kernel axiom audit.
+  - **Real Cumulative Compilation & Token Accounting ($T_1 \to T_2$):** In `run_calibration_family`, $D_1$ is compiled as an immutable frozen module prefix to $D_2$, ensuring $W_D(T_1 + T_2) = \text{tokens}(D_1 + D_2)$ and $\Delta_D^{(2)} = W_D(T_1 + T_2) - W_D(T_1) \ge 0$. For Lifted, $T_2$ reuses only the representation core ($\text{LiftDom}, \text{LiftCod}, \text{liftT}, \text{invariant}$) and proved lemmas from $T_1$, with dedicated fresh $T_2$ propositions $\text{LiftedClaim}_{T2}$ and $\text{BridgeProp}_{T2}$; cumulative footprint is evaluated on $S_1 + L_1 + S_2 + L_2$.
+  - **Lean-Native Declaration Discovery (Regex Deprecation):** Candidate submissions are encapsulated in `namespace CandidateExecutor`. Lean environment reflection (`isCandidateDecl` and `getCandidateDecls`) discovers all candidate declarations (including `_private`, noncomputable, and Unicode names) natively from `env.constants`. Python regex parsing is completely removed.
+  - **Transitive Module-Local Non-Circularity:** `checkNonCircularityTransitive` computes the full transitive dependency closure of `lifted_theorem` over candidate declarations via `NameSet`, strictly rejecting indirect circularity through intermediate helper lemmas with `CIRCULAR_LIFT_DEPENDENCY`.
+  - **Mathematical Target & Admissibility Corrections:** Corrected Fibonacci Cassini identity in `calibration/fibonacci_t1.lean` to require `(hn : 1 ≤ n)`; added `Nat.fib_add` and `Nat.fib_add_two` to `admissibility/fibonacci.json`; updated `admissibility/pell.json` and meta-checkers with prefix matching to forbid all `Pell.Solution₁` child lemmas.

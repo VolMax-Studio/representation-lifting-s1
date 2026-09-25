@@ -113,17 +113,23 @@ def test_harness_calibration():
         if role == "D":
             return ("```lean\ntheorem executor_theorem : True := trivial\n```", "end_turn", False)
         elif role == "S":
+            last_msg = msgs[-1]["content"] if msgs else ""
+            if "FROZEN REPRESENTATION CORE" in last_msg or "Define new `LiftedClaim` and `BridgeProp`" in last_msg:
+                return ("""```lean
+def LiftedClaim : Prop := liftT 0 = 1
+def BridgeProp : Prop := True ↔ (liftT 0 = 1)
+```""", "end_turn", False)
             return ("""```lean
 abbrev LiftDom := Nat
 abbrev LiftCod := Nat
 def liftT (n : LiftDom) : LiftCod := n + 1
-def LiftedClaim : Prop := True
-def BridgeProp : Prop := True ↔ True
+def LiftedClaim : Prop := liftT 0 = 1
+def BridgeProp : Prop := True ↔ (liftT 0 = 1)
 ```""", "end_turn", False)
         elif role == "L":
             return ("""```lean
-theorem preservation_bridge : BridgeProp := by constructor <;> intro _ <;> trivial
-theorem lifted_theorem : LiftedClaim := trivial
+theorem preservation_bridge : BridgeProp := Iff.intro (fun _ => rfl) (fun _ => trivial)
+theorem lifted_theorem : LiftedClaim := rfl
 ```""", "end_turn", False)
         return ("", "end_turn", True)
 
@@ -152,7 +158,9 @@ theorem lifted_theorem : LiftedClaim := trivial
             report = run_calibration_family("mockfam", "claude-sonnet-4-6", mock_generator=mock_calib)
             assert "direct" in report
             assert "lifted" in report
-            assert report["schema_version"] == "v0.6"
+            assert report["schema_version"] == "v0.7"
+            assert report["direct"]["delta_d_2"] is not None
+            assert report["lifted"]["delta_l_2"] is not None
             print("test_harness_calibration (H1 calibration state machine execution): PASS")
         finally:
             eh.ROOT_DIR = orig_root

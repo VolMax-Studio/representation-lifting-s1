@@ -1,8 +1,15 @@
 {
   "mode": "Method",
   "case": "pell",
-  "description": "Prohibits pre-packaged Pell equation solution generators in Method Mode.",
+  "description": "Prohibits pre-packaged Pell equation solution generators and lemmas in Method Mode.",
   "prohibited_constants": [
-    "Pell.Solution₁"
+    "Pell.Solution₁",
+    "Pell.Solution₁.x_mul",
+    "Pell.Solution₁.y_mul",
+    "Pell.Solution₁.mul",
+    "Pell.Solution₁.pow",
+    "Pell.Solution₁.x_pow",
+    "Pell.Solution₁.y_pow",
+    "Pell.Solution₁.x_pow_pos"
   ]
 }

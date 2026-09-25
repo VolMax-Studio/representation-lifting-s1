@@ -6,13 +6,14 @@ Invokes tools/CheckBridge.lean in the pinned Lake/Lean kernel environment.
 Enforces:
 1. Strict requirement for pinned Lake environment (lean-toolchain, lakefile.toml, lake-manifest.json).
 2. Extraction of top-level imports to the head of the file.
-3. Elaboration and pure-kernel axiom audit of LiftedClaim and BridgeProp (zero sorryAx).
-4. Identity Guard (AND semantics: LiftDom = LiftCod AND liftT = id).
-5. Sequential dependent binder type matching.
-6. Target linkage, LiftedClaim linkage, and constant reference to liftT.
-7. Machine-readable Method Mode deny-list enforcement.
-8. Verification of exact sentinel: CHECK_BRIDGE_SENTINEL_OK.
-Part of representation-lifting-s1 experimental protocol (v0.6).
+3. Candidate definitions wrapped in `namespace CandidateExecutor ... end CandidateExecutor`.
+4. Elaboration and pure-kernel axiom audit of ALL candidate declarations (zero sorryAx).
+5. Identity Guard (AND semantics: LiftDom = LiftCod AND liftT = id).
+6. Sequential dependent binder type matching.
+7. Target linkage, LiftedClaim linkage, and constant reference to liftT.
+8. Machine-readable Method Mode deny-list enforcement (prefix and exact match).
+9. Verification of exact sentinel: CHECK_BRIDGE_SENTINEL_OK.
+Part of representation-lifting-s1 experimental protocol (v0.7).
 """
 
 import sys
@@ -82,8 +83,10 @@ def verify_bridge_with_lean(target_file: str, stub_file: str, admissibility_json
             f.write(m_body)
             f.write("\n\n-- Target statement\n")
             f.write(t_body)
-            f.write("\n\n-- Candidate stub\n")
+            f.write("\n\n-- Candidate stub in candidate namespace\n")
+            f.write("namespace CandidateExecutor\n")
             f.write(s_body)
+            f.write("\nend CandidateExecutor\n")
             f.write("\n\n-- Run verification\n")
             f.write(f"#eval runCheckBridge `frozen_target `BridgeProp `LiftedClaim `liftT `LiftDom `LiftCod {prohibited_list}\n")
             

@@ -1,9 +1,11 @@
 {
   "mode": "Method",
   "case": "fibonacci",
-  "description": "Prohibits terminal Cassini library identities in Method Mode.",
+  "description": "Prohibits terminal Cassini and additive Fibonacci library identities in Method Mode.",
   "prohibited_constants": [
     "Int.fib_succ_mul_fib_pred_sub_fib_sq",
+    "Nat.fib_add",
+    "Nat.fib_add_two",
     "Nat.fib_gcd"
   ]
 }
