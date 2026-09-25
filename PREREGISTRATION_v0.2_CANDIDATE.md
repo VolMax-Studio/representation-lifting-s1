@@ -1,8 +1,9 @@
-# representation-lifting-s1: PREREGISTRATION v0.1 CANDIDATE (SUPERSEDED)
-**Status:** SUPERSEDED BY v0.2 CANDIDATE (see PREREGISTRATION_v0.2_CANDIDATE.md)  
+# representation-lifting-s1: PREREGISTRATION v0.2 CANDIDATE
+**Status:** READY FOR BYTE-LEVEL TEXT/PROCEDURE GATE (SUPERSEDES v0.1 CANDIDATE `254e06d8…`)  
 **Author / Principal Investigator:** Ivan Nestorov  
 **Target Toolchain:** Lean 4 (v4.34.0) / Mathlib v4.34.0  
 **Repository Location:** `PORTFOLIO/representation-lifting-s1/`  
+**GitHub Tracking Repo:** `https://github.com/VolMax-Studio/representation-lifting-s1`  
 **Date:** 2026-09-25  
 
 ---
@@ -96,6 +97,7 @@ Both branches ($L$ and $D$) execute $T_2$ in the **same source file** immediatel
 
 ### 2.2 Blind Transfer Arm (Discovery Feasibility)
 Evaluates whether a representation-first search can discover a valid representation and preservation bridge on externally sourced problems without hindsight, and records the resulting completion outcomes.
+- **Broader Scope Declaration:** Because the external pool is constructed from the complete ProofNet-Verified corpus without subjective mathematical domain filtering, it encompasses undergraduate analysis, topology, and abstract algebra. Under the 60-minute representation search ceiling, a high frequency of `LIFT-NOT-FOUND` is an expected, legitimate descriptive finding of H2 (quantifying the empirical boundary of automatic representation discovery), rather than an experimental failure.
 - Does **not** assert claims regarding $T_2$ amortization (as external benchmark items do not come paired with predetermined structural sibling theorems).
 
 ### 2.3 Negative Control Arm (Scoring Integrity Check)
@@ -159,37 +161,25 @@ If the surviving pool count satisfies $N < 3$ (or in the extreme $N = 0$):
    - Chain Hash: `52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971`.
    - Genesis Time: `1692803367` (Unix epoch).
    - Period: `3` seconds.
-2. **Round Formula:**  
-   Given publication timestamp $t_{\text{pub}}$ of the committed `POOL.tsv` hash, the target round is scheduled at least 60 minutes into the future:
-   $$r_{\text{target}} = \left\lfloor \frac{t_{\text{target}} - 1692803367}{3} \right\rfloor + 1$$
+2. **Guaranteed Future Round Formula:**  
+   To prevent selecting a round that has already been published at timestamp $t_{\text{pub}}$, an immutable safety gap of $600$ seconds is enforced:
+   $$u = t_{\text{pub}} + 600$$
+   The scheduled round is computed via `tools/drand_schedule.py`:
+   $$\boxed{ r_{\text{scheduled}} = \left\lfloor \frac{u - 1692803367}{3} \right\rfloor + 2 }$$
+   
+   **Structural Invariant:**  
+   $$\text{time}(r_{\text{scheduled}} - 1) \le u < \text{time}(r_{\text{scheduled}}) \quad \text{where} \quad \text{time}(r) = 1692803367 + (r - 1) \times 3$$
+   *(The $+2$ offset strictly guarantees that the selected round is published strictly after $u$, even if $u$ coincides exactly with a round boundary. Fully verified by regression tests in `tests/test_drand_schedule.py`).*
+
 3. **Randomness Value $R$:**  
-   $R = \text{SHA-256}(\text{signature})$ of round $r_{\text{target}}$, verified via BLS verification against the quicknet public key.
-4. **Rejection-Sampling Algorithm:**
+   $R = \text{SHA-256}(\text{signature})$ of round $r_{\text{scheduled}}$, verified via BLS verification against the quicknet public key.
+4. **Rejection-Sampling Algorithm (`tools/select_indices.py`):**  
    Selection of 3 distinct indices $i \in \{0, 1, \dots, N-1\}$ proceeds deterministically without modulo bias:
-
-```python
-import hashlib
-
-def select_indices(R: bytes, N: int, count: int = 3) -> list[int]:
-    selected = []
-    j = 0
-    limit = (2**256) - ((2**256) % N)
-    
-    while len(selected) < count:
-        msg = b"representation-lifting-s1/v0.1\x00" + R + j.to_bytes(8, byteorder="big")
-        H_j = hashlib.sha256(msg).digest()
-        v_j = int.from_bytes(H_j, byteorder="big")
-        j += 1
-        
-        if v_j >= limit:
-            continue
-            
-        candidate_idx = v_j % N
-        if candidate_idx not in selected:
-            selected.append(candidate_idx)
-            
-    return selected
-```
+   ```python
+   # Evaluated deterministically via tools/select_indices.py
+   limit = (2**256) - ((2**256) % N)
+   # Hash chain: SHA256("representation-lifting-s1/v0.1\x00" || R || uint64_be(j))
+   ```
 
 ---
 
@@ -214,6 +204,7 @@ For each blind problem:
    theorem preservation_bridge ... : ... ↔ ... := by sorry
    ```
 3. **Mechanical Verification, Identity Guard, & Target Linkage:**
+   Evaluated strictly by the automated verification tool `tools/check_bridge.py`:
    - **Toolchain Compilation:** The stub must compile with zero errors on the pinned toolchain (`sorry` permitted strictly inside `preservation_bridge`).
    - **Identity Guard Check:** In an isolated environment, the stub is checked for definitional triviality:
      ```lean
@@ -223,11 +214,15 @@ For each blind problem:
      *Rule:* If the isolated identity check file elaborates without error, the lift is rejected as trivial $\implies$ recorded mechanically as **`LIFT-NOT-FOUND / IDENTITY_GUARD`**. If compilation fails (e.g. types differ or `liftT` is not definitionally `id`), the identity guard is **not** activated.
      > *The identity guard excludes definitionally identical lifts. It does not purport to decide whether every surviving representation is mathematically substantive.* Any vacuous but non-identity lift proceeds into execution and absorbs the setup penalty.
    - **Target Linkage Verification:**  
-     To prevent disconnected bridges (e.g. `foo (liftT x) ↔ foo (liftT x)`), a Lean meta-check inspects `preservation_bridge`:
-     1. Peels off all leading universal $\Pi$-binders of the target theorem and `preservation_bridge`.
-     2. Verifies that one side of the resulting `Iff` ($\leftrightarrow$) is **definitionally equal** to the target theorem's conclusion.
-     3. Verifies that the other side of the `Iff` contains the constant identifier `liftT`.
-     If the bridge fails this linkage check $\implies$ recorded as **`LIFT-NOT-FOUND / UNLINKED_BRIDGE`**.
+     To prevent disconnected or tautological bridges, `tools/check_bridge.py`:
+     1. Peels off all leading universal $\Pi$-binders of the target theorem and `preservation_bridge`, ensuring no unquantified extraneous hypotheses are introduced.
+     2. Verifies that the conclusion is an equivalence (`↔`).
+     3. Rejects tautologies of the form $P \leftrightarrow P$.
+     4. Verifies that one side of the equivalence matches the target theorem's conclusion.
+     5. Verifies that the other side of the equivalence references the constant `liftT`.
+     If the bridge fails any of these checks $\implies$ recorded as **`LIFT-NOT-FOUND / UNLINKED_BRIDGE`**.  
+     *(Tested and locked against 6 frozen fixtures in `fixtures/bridge/`).*
+
 4. **Outcome Assignment:**
    - Compiles cleanly, passes Identity Guard, and passes Target Linkage: Canonicalized, SHA-256 hashed, locked, and passed to Executor L as `LIFT-FOUND`.
    - Any failure: Mechanically recorded as **`LIFT-NOT-FOUND`**. No human subjective adjudication.
@@ -255,10 +250,10 @@ To guarantee that branches prove literally the assigned target theorem:
 2. **Uniform Prompting:**
    - Neutral prompt text: *"Write a clear, maintainable Lean proof."*
    - Prompts must **never** instruct length or tactic minimization. Prompt SHA-256 is recorded in the execution manifest.
-3. **Executor Specifications:**
-   - **Primary Fixed Model:** Claude 3.5 Sonnet (pinned version in manifest).
-   - **Replication Model:** GPT-4o (pinned version in manifest; executed independently as a preregistered replication series without pooling).
-   - Sampling parameters: Fixed temperature (or recorded as "not user-configurable" if locked by API).
+3. **Executor Specifications & Pre-Freeze Smoke Test:**
+   - **Primary Fixed Model:** `claude-sonnet-4-6` (Anthropic active tier) or dated snapshot `claude-opus-4-5-20251101`.
+   - **Replication Model:** `gpt-5.6-sol` (OpenAI active tier) or dated snapshot `gpt-4o-2024-08-06`.
+   - **Mandatory Pre-Freeze Smoke Test:** Prior to human ratification (Gate 6), a minimal API connectivity test (`tools/smoke_test_executor.py`) must be executed to record HTTP 200 availability and returned model identity into `tools/smoke_test_receipt.json`. If an API endpoint is deprecated or inaccessible, the freeze gate fails closed.
 4. **Binding Effort Budget:**
    - Exactly **3 hours wall-clock time** per branch.
    - Wall-clock timeout is the single binding termination condition. (Model tokens, solver steps, and heartbeats are recorded strictly as secondary descriptive metrics).
@@ -296,11 +291,11 @@ Where $W_{\text{token}}$ is the **normalized authored Lean lexical token count**
 - **Whitespace Invariance:** Formatting variations (e.g. indentation, line breaks, or multiple spaces) produce an identical token stream and identical count.
 - **Golden Test Fixtures:**
   The repository commits a set of golden test fixtures (`fixtures/*.lean`) with pre-calculated expected token counts covering critical lexical edge cases:
-  1. Nested block comments (`/- /- ... -/ -/`).
-  2. Quoted identifiers (`«foo bar»`).
-  3. Unicode mathematical symbols.
-  4. String literals containing comment markers (`"text -- not a comment"`).
-  5. String literals containing escaped quotes (`"text \"escaped\""`).
+  1. Nested block comments (`/- /- ... -/ -/`) -> 7 tokens.
+  2. Quoted identifiers (`«foo bar»`) -> 15 tokens.
+  3. Unicode mathematical symbols -> 29 tokens.
+  4. String literals containing comment markers (`"text -- not a comment"`) -> 12 tokens.
+  5. String literals containing escaped quotes (`"text \"escaped\""`) -> 12 tokens.
 
 > **Metric Interpretation Disclaimer:**  
 > *$W_{\text{token}}$ measures artifact size under a fixed authoring protocol; it is not interpreted as human effort, cognitive difficulty, or semantic proof complexity.*
@@ -355,6 +350,6 @@ Evaluated according to the pre-frozen Control Outcome Matrix in Section 2.3:
 - [ ] **Gate 1:** Mechanical nontriviality script (`tools/nontriviality_filter.sh`) executed on ProofNet-Verified (367 base items).
 - [ ] **Gate 2:** Verbatim Lean 4 v4.34.0 compilation filter executed; `EXCLUDED_TOOLCHAIN_INCOMPATIBLE.tsv` generated with exact compiler diagnostics.
 - [ ] **Gate 3:** `POOL.tsv` compiled, sorted, and canonical SHA-256 published.
-- [ ] **Gate 4:** Target drand round committed based on publication timestamp ($r_{\text{target}}$ on `quicknet`).
+- [ ] **Gate 4:** Target drand round committed via `tools/drand_schedule.py` ($r_{\text{scheduled}} = \lfloor (u - 1692803367)/3 \rfloor + 2$ with $u = t_{\text{pub}} + 600$).
 - [ ] **Gate 5:** Case-specific admissibility manifests, neutral prompts, tokenization script, and golden test fixtures committed and hashed.
 - [ ] **Gate 6:** Human Ratification by Ivan Nestorov prior to the scheduled publication timestamp of the drand round.
