@@ -1,24 +1,28 @@
 #!/usr/bin/env bash
-# tools/verify_proof.sh
-# Verification harness for Role D (Direct Proof Executor):
+# tools/verify_lifted.sh
+# Verification harness for Role L (Lifted Proof Executor):
 # 1. Enforces pinned Lake environment (lean-toolchain, lakefile.toml, lake-manifest.json).
 # 2. Scans executor code for escape tokens (sorry, admit, native_decide, axiom).
-# 3. Invokes Lean 4 meta-checker (tools/VerifyTarget.lean) to verify:
-#    - Exact definitional match between executor_theorem and frozen_target
-#    - Strict kernel axiom audit (A_observed ⊆ {propext, Classical.choice, Quot.sound})
-# 4. Enforces exit code 0 and exact sentinel: VERIFICATION_SUCCESS.
+# 3. Combines frozen representation prefix with executor proof.
+# 4. Invokes tools/VerifyLifted.lean to verify:
+#    - type(preservation_bridge) ≡ BridgeProp
+#    - type(executor_theorem) ≡ type(frozen_target)
+#    - Zero sorryAx and zero custom axioms in both proofs
+#    - Proof-of-method provenance: preservation_bridge ∈ Deps*(executor_theorem)
+# 5. Enforces exit code 0 and exact sentinel: VERIFY_LIFTED_SENTINEL_OK.
 # Part of representation-lifting-s1 experimental protocol (v0.5).
 
 set -euo pipefail
 
-if [ "$#" -lt 3 ]; then
-    echo "Usage: $0 <frozen_target_file> <executor_lean_file> <executor_theorem_name>" >&2
+if [ "$#" -lt 4 ]; then
+    echo "Usage: $0 <frozen_target_file> <frozen_stub_prefix_file> <executor_lean_file> <executor_theorem_name>" >&2
     exit 2
 fi
 
 FROZEN_TARGET_FILE="$1"
-EXECUTOR_LEAN_FILE="$2"
-EXECUTOR_THEOREM="$3"
+FROZEN_STUB_PREFIX="$2"
+EXECUTOR_LEAN_FILE="$3"
+EXECUTOR_THEOREM="$4"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -39,7 +43,7 @@ fi
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-# 3. Extract and hoist imports to the absolute top
+# 3. Extract and hoist all imports to the absolute top
 EXTRACT_SCRIPT='
 import sys, re
 imports = ["import Lean"]
@@ -55,35 +59,38 @@ with open(sys.argv[-1], "w", encoding="utf-8") as out:
         out.write(imp + "\n")
 '
 
-VERIFY_LEAN="$TMP_DIR/VerifyHarness.lean"
+python3 -c "$EXTRACT_SCRIPT" "$FROZEN_TARGET_FILE" "$FROZEN_STUB_PREFIX" "$EXECUTOR_LEAN_FILE" "$SCRIPT_DIR/VerifyLifted.lean" "$TMP_DIR/imports.lean"
 
-python3 -c "$EXTRACT_SCRIPT" "$FROZEN_TARGET_FILE" "$EXECUTOR_LEAN_FILE" "$SCRIPT_DIR/VerifyTarget.lean" "$TMP_DIR/imports.lean"
+VERIFY_LEAN="$TMP_DIR/VerifyLiftedHarness.lean"
 
 cat "$TMP_DIR/imports.lean" > "$VERIFY_LEAN"
 echo "" >> "$VERIFY_LEAN"
-echo "-- Core VerifyTarget definitions" >> "$VERIFY_LEAN"
-grep -vE '^\s*import\b' "$SCRIPT_DIR/VerifyTarget.lean" >> "$VERIFY_LEAN"
+echo "-- Core VerifyLifted definitions" >> "$VERIFY_LEAN"
+grep -vE '^\s*import\b' "$SCRIPT_DIR/VerifyLifted.lean" >> "$VERIFY_LEAN"
 echo "" >> "$VERIFY_LEAN"
 echo "-- Target statement" >> "$VERIFY_LEAN"
 grep -vE '^\s*import\b' "$FROZEN_TARGET_FILE" >> "$VERIFY_LEAN"
 echo "" >> "$VERIFY_LEAN"
-echo "-- Executor declarations" >> "$VERIFY_LEAN"
+echo "-- Frozen Representation Prefix (from Role S)" >> "$VERIFY_LEAN"
+grep -vE '^\s*import\b' "$FROZEN_STUB_PREFIX" >> "$VERIFY_LEAN"
+echo "" >> "$VERIFY_LEAN"
+echo "-- Executor Declarations (from Role L)" >> "$VERIFY_LEAN"
 grep -vE '^\s*import\b' "$EXECUTOR_LEAN_FILE" >> "$VERIFY_LEAN"
 echo "" >> "$VERIFY_LEAN"
-echo "#eval runVerifyTarget \`frozen_target \`$EXECUTOR_THEOREM" >> "$VERIFY_LEAN"
+echo "#eval runVerifyLifted \`frozen_target \`BridgeProp \`preservation_bridge \`$EXECUTOR_THEOREM" >> "$VERIFY_LEAN"
 
-# 4. Execute Lean verification strictly via pinned lake env lean
+# 4. Execute verification strictly via pinned lake env lean
 OUTPUT="$TMP_DIR/verify_output.txt"
 cd "$PROJECT_ROOT"
 
 if ! lake env lean "$VERIFY_LEAN" > "$OUTPUT" 2>&1; then
-    echo "VERIFICATION_FAILED: Proof does not elaborate, types mismatch, or non-standard axioms used:" >&2
+    echo "VERIFICATION_FAILED: Proof does not elaborate, types mismatch, axioms non-standard, or provenance failed:" >&2
     cat "$OUTPUT" >&2
     exit 1
 fi
 
-if ! grep -q "VERIFICATION_SUCCESS" "$OUTPUT"; then
-    echo "VERIFICATION_FAILED: Sentinel VERIFICATION_SUCCESS missing from output:" >&2
+if ! grep -q "VERIFY_LIFTED_SENTINEL_OK" "$OUTPUT"; then
+    echo "VERIFICATION_FAILED: Sentinel VERIFY_LIFTED_SENTINEL_OK missing from output:" >&2
     cat "$OUTPUT" >&2
     exit 1
 fi

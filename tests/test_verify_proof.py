@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 tests/test_verify_proof.py
-Tests tools/verify_proof.sh on binder targets, alpha-renaming, and wrong proofs.
+Tests tools/verify_proof.sh on binder targets, alpha-renaming, wrong proofs, and Mathlib targets.
 """
 
 import sys
@@ -9,7 +9,9 @@ import os
 import subprocess
 import tempfile
 
-TOOLS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "tools"))
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+TOOLS_DIR = os.path.join(ROOT_DIR, "tools")
+MATHLIB_DIR = os.path.join(ROOT_DIR, "fixtures", "mathlib")
 VERIFY_SCRIPT = os.path.join(TOOLS_DIR, "verify_proof.sh")
 
 def test_verify_proof():
@@ -50,6 +52,15 @@ def test_verify_proof():
         assert res_sorry.returncode != 0
         assert "FAIL_CLOSED" in res_sorry.stderr or "FAIL_CLOSED" in res_sorry.stdout
         print("test_verify_proof (fail-closed sorry rejection): PASS")
+
+        # 4. Mathlib proof verification
+        m_target = os.path.join(MATHLIB_DIR, "mathlib_target.lean")
+        m_proof = os.path.join(MATHLIB_DIR, "mathlib_direct_proof.lean")
+        res_mathlib = subprocess.run([VERIFY_SCRIPT, m_target, m_proof, "executor_theorem"],
+                                     capture_output=True, text=True)
+        assert res_mathlib.returncode == 0, f"Mathlib proof verification failed:\nSTDOUT: {res_mathlib.stdout}\nSTDERR: {res_mathlib.stderr}"
+        assert "VERIFICATION_SUCCESS" in res_mathlib.stdout
+        print("test_verify_proof (Mathlib AddCommGroup target and proof): PASS")
 
 if __name__ == "__main__":
     test_verify_proof()

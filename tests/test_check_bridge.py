@@ -14,6 +14,7 @@ Tests every decision branch of CheckBridge.lean:
 9. Identity Guard: same domain and id function (FAIL: IDENTITY_GUARD)
 10. Identity Guard: same domain but non-id function (PASS)
 11. Custom axiom in representation layer (FAIL: FORBIDDEN_REPRESENTATION_AXIOM)
+12. Mathlib target with typeclass binders and external imports (PASS)
 """
 
 import sys
@@ -25,6 +26,7 @@ from tools.check_bridge import check_bridge
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 BRIDGE_DIR = os.path.join(ROOT_DIR, "fixtures", "bridge")
 IDENTITY_DIR = os.path.join(ROOT_DIR, "fixtures", "identity")
+MATHLIB_DIR = os.path.join(ROOT_DIR, "fixtures", "mathlib")
 
 def test_fixtures():
     cases = [
@@ -82,7 +84,12 @@ def test_fixtures():
         ("custom_axiom",
          os.path.join(BRIDGE_DIR, "valid_target.lean"),
          os.path.join(BRIDGE_DIR, "custom_axiom_stub.lean"),
-         False, "FORBIDDEN_REPRESENTATION_AXIOM")
+         False, "FORBIDDEN_REPRESENTATION_AXIOM"),
+
+        ("mathlib_bridge",
+         os.path.join(MATHLIB_DIR, "mathlib_target.lean"),
+         os.path.join(MATHLIB_DIR, "mathlib_stub.lean"),
+         True, "BRIDGE_VALID")
     ]
     
     for name, target_file, stub_file, exp_pass, exp_msg in cases:

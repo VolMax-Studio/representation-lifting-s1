@@ -1,7 +1,7 @@
-# representation-lifting-s1: PREREGISTRATION v0.4 CANDIDATE (SUPERSEDED)
-**Status:** SUPERSEDED BY v0.5 CANDIDATE (see PREREGISTRATION_v0.5_CANDIDATE.md)  
+# representation-lifting-s1: PREREGISTRATION v0.5 CANDIDATE
+**Status:** READY FOR BYTE-LEVEL TEXT/PROCEDURE GATE (SUPERSEDES v0.1 `254e06d8…`, v0.2 `4fdc0bf4…`, v0.3 `da532b0e…`, AND v0.4 `bdc5c76e…`)  
 **Author / Principal Investigator:** Ivan Nestorov  
-**Target Toolchain:** Lean 4 (v4.34.0) / Mathlib v4.34.0  
+**Target Toolchain:** Lean 4 (v4.34.0) / Mathlib v4.34.0 (commit `5ed2965256430c3649e86755f9576b54eca72435`)  
 **Repository Location:** `PORTFOLIO/representation-lifting-s1/`  
 **GitHub Tracking Repo:** `https://github.com/VolMax-Studio/representation-lifting-s1`  
 **Date:** 2026-09-25  
@@ -39,7 +39,7 @@ The study consists of three strictly separated arms:
 │     Calibration-Family Arm      │        │        Blind Transfer Arm       │        │      Negative Control Arm       │
 ├─────────────────────────────────┤        ├─────────────────────────────────┤        ├─────────────────────────────────┤
 │ • Fibonacci (Cassini + Additive)│        │ • ProofNet-Verified (367 base)  │        │ • Sum of odd numbers = n²       │
-│ • Pell (Fund. unit + Product)   │        │ • Mechanical nontriviality      │        │ • Frozen Gnomon Stub            │
+│ • Pell (Fund. unit + Product)   │        │ • Mechanical nontriviality      │        │ • Frozen Gnomon BridgeProp      │
 │ • Roots of Unity (Geom sum + Re)│        │ • Verbatim compile on 4.34      │        │ • Symmetric outcome matrix      │
 │ Evaluates: Symmetric marginal   │        │ • drand quicknet (N=3 cases)    │        │ • Falsifies metric bias         │
 │            amortization (T1, T2)│        │ Evaluates: Discovery & Step 1   │        │ Evaluates: Scoring integrity    │
@@ -107,7 +107,7 @@ Evaluates whether a representation-first search can discover a valid representat
       ∑ k ∈ Finset.range n, (2 * k + 1) = n^2
   ```
 - **Direct Path:** Direct induction or basic arithmetic summation over `Finset.range`.
-- **Lifted Path:** Pre-frozen gnomon decomposition stub (`calibration/ControlGnomonStub.lean` committed before execution).
+- **Lifted Path:** Pre-frozen gnomon decomposition stub (`calibration/ControlGnomonStub.lean` committed before execution), providing `BridgeProp`.
 - **Pre-frozen Control Outcome Matrix:**
   | Observed Outcome | Formalization Footprint | Verdict | Operational Action |
   |---|---|---|---|
@@ -124,11 +124,11 @@ Evaluates whether a representation-first search can discover a valid representat
 ### 3.1 Source Corpus & Filtering Pipeline
 1. **Base Corpus:** `ProofNet-Verified` (commit-pinned repository, containing 367 source cases).
 2. **Canonical ProofNet Bundle:**  
-   To preserve full elaborability in Lean 4 without manual syntax parsing, each problem entry is assembled canonicalized as:
+   Each problem entry is assembled canonicalized as:
    $$\text{Canonical Target} = \text{header} + \text{helper} + \text{frozen\_target declaration}$$
    All `import` statements are automatically hoisted to the head of the file during verification.
 3. **Elimination of Subjective Domain Filter:**  
-   Because ProofNet-Verified lacks an authoritative `NumberTheory`/`Algebra` column in its published schema, **no manual domain classification is permitted**. All 367 cases enter the mechanical pipeline. If a topological or analytic problem fails to yield a representation lift, that failure is recorded as an authentic `LIFT-NOT-FOUND`.
+   Because ProofNet-Verified lacks an authoritative `NumberTheory`/`Algebra` column in its published schema, **no manual domain classification is permitted**. All 367 cases enter the mechanical pipeline. If a problem fails to yield a representation lift, that failure is recorded as an authentic `LIFT-NOT-FOUND`.
 4. **Mechanical Nontriviality Filter:**  
    Each candidate theorem is tested against 4 independent tactics under a strict heartbeat ceiling:
    - `by rfl`
@@ -138,7 +138,7 @@ Evaluates whether a representation-first search can discover a valid representat
    - Parameter: `set_option maxHeartbeats 200000`.
    - Implemented via a single hashed script (`tools/nontriviality_filter.sh`). Any problem solved by any of the 4 tactics is excluded.
 5. **Verbatim Toolchain Compilation Filter:**
-   - Every surviving theorem statement must elaborate and compile **verbatim** on the pinned toolchain (`Lean 4 v4.34.0` / `Mathlib v4.34.0`) without editing any statement line, import, or type signature.
+   - Every surviving theorem statement must elaborate and compile **verbatim** on the pinned toolchain (`Lean 4 v4.34.0` / `Mathlib v4.34.0` commit `5ed29652…`) without editing any statement line, import, or type signature.
    - Any candidate failing verbatim compilation is assigned to `EXCLUDED_TOOLCHAIN_INCOMPATIBLE.tsv` with compiler error diagnostics and excluded prior to pool serialization.
 6. **Training Contamination Disclaimer:**
    > *The corpus is public and prior model exposure cannot be excluded or audited. Fresh contexts prevent conversational leakage between experimental branches; they do not establish training-data decontamination.*
@@ -190,7 +190,7 @@ For each blind problem:
    - **Pinned Identity:** `claude-sonnet-4-6` (Primary) / `gpt-5.6-sol` (Replication).
    - **Search Budget:** Exactly 3600 seconds wall-clock time, capped at 15 turns in `tools/executor_harness.py`.
    - **Tool Access:** Read target statement, read admissibility manifest, write candidate stub file, execute Lean compiler diagnostics. Zero access to external search or human assistance.
-2. **Deliverable Requirement:** The search phase must produce an executable Lean stub file conforming to the generalized representation interface:
+2. **Deliverable Requirement:** The search phase produces an executable Lean stub file conforming to the proof-free representation specification interface:
    ```lean
    -- Generic representation types
    abbrev LiftDom := ...
@@ -202,76 +202,75 @@ For each blind problem:
    -- Invariant or target structure
    def invariant : LiftCod → ... := ...
    
-   -- Preservation bridge (sorry allowed ONLY here)
-   theorem preservation_bridge ... : ... ↔ ... := by sorry
+   -- Proof-free Bridge Property specification (zero sorryAx)
+   def BridgeProp : Prop :=
+     ∀ (vars...), original_claim ↔ lifted_claim
    ```
 3. **Pure Lean Meta-Checker Verification (`tools/CheckBridge.lean`):**
-   The candidate stub is verified directly inside the Lean 4 kernel/MetaM via `tools/check_bridge.py`:
-   - **Compilation:** The entire stub must elaborate without error on the pinned toolchain.
+   The candidate stub is verified directly inside the Lean 4 kernel via `tools/check_bridge.py`:
+   - **Environment Requirement:** Verified strictly using the checked-in Lake project via `lake env lean`. Missing environment files terminate with `ENVIRONMENT_INVALID`.
    - **Representation Layer Axiom Whitelist:**  
-     Transitive axioms of `LiftDom`, `LiftCod`, `liftT`, and any helper definitions must satisfy:
+     Transitive axioms of `LiftDom`, `LiftCod`, `liftT`, and `BridgeProp` must satisfy:
      $$A_{\text{rep}} \subseteq \{\texttt{propext}, \texttt{Classical.choice}, \texttt{Quot.sound}\}$$
      *(Zero `sorryAx` and zero custom unproved axioms permitted in representation definitions).*
-   - **Bridge Axiom Whitelist:**  
-     $$A_{\text{bridge}} \subseteq \{\texttt{propext}, \texttt{Classical.choice}, \texttt{Quot.sound}, \texttt{sorryAx}\}$$
-     *(Strictly `sorryAx` allowed in `preservation_bridge`).*
    - **Identity Guard (AND semantics):** Evaluates definitional equality in the Lean kernel:
      $$\text{isDefEq}(\text{LiftDom}, \text{LiftCod}) \land \text{isDefEq}(\text{liftT}, @\text{id LiftDom})$$
-     If both domain/codomain are definitionally identical AND `liftT` is definitionally the identity function $\implies$ fails with **`LIFT-NOT-FOUND / IDENTITY_GUARD`**. (Tested and confirmed: same domain + non-id mapping passes; same domain + id mapping fails).
+     If both domain/codomain are definitionally identical AND `liftT` is definitionally the identity function $\implies$ fails with **`LIFT-NOT-FOUND / IDENTITY_GUARD`**.
    - **Sequential Dependent Binder Type Matching:**
-     1. Uses `forallTelescope` on `frozen_target` and `preservation_bridge`.
-     2. Asserts binder count matches identically.
-     3. For each binder index $i$, verifies $t_{\text{type}} \equiv_{\text{def}} b_{\text{type}}[\vec{b}_{<i} \mapsto \vec{t}_{<i}]$. Rejects mismatched hypotheses (e.g. $2 \le n$ vs $100 < n$) or mismatched dependent binders.
+     Peels binders of `BridgeProp.value` and `frozen_target.type`. Asserts binder count matches and sequentially verifies $t_{\text{type}} \equiv_{\text{def}} b_{\text{type}}[\vec{b}_{<i} \mapsto \vec{t}_{<i}]$. Rejects mismatched hypotheses or mismatched dependent binders.
    - **Target Linkage Verification:**
-     1. Asserts the conclusion is an equivalence (`↔`).
-     2. Asserts LHS and RHS are not syntactically tautological ($P \leftrightarrow P$).
-     3. Asserts one side is definitionally equal (`isDefEq`) to the target conclusion.
-     4. Asserts the other side contains an explicit constant reference (`Expr.const`) to `liftT`.
-   - **Sentinel Enforcement:** Requires exit code 0 and exact terminal line `CHECK_BRIDGE_SENTINEL_OK`.  
-   *(Fully verified and regression-tested across all 11 frozen fixtures in `tests/test_check_bridge.py`).*
+     Asserts the conclusion is an equivalence (`↔`), non-tautological, matches the target conclusion on one side, and the other side contains constant reference `liftT`.
+   - **Sentinel Enforcement:** Requires exit code 0 and exact terminal line `CHECK_BRIDGE_SENTINEL_OK`.
 4. **Outcome Assignment:**
    - Passes all checks: Canonicalized, SHA-256 hashed, locked, and passed to Executor L as `LIFT-FOUND`.
    - Any failure: Mechanically recorded as **`LIFT-NOT-FOUND`**. No human subjective adjudication.
 
-### 4.2 Exact-Target Verification & Axiom Audit
-To guarantee that branches prove literally the assigned target theorem:
-1. **Pure Lean Meta-Checker (`tools/VerifyTarget.lean`):**
-   Proof verification executes directly in the Lean kernel via `tools/verify_proof.sh`:
+### 4.2 Exact-Target & Lifted Verification: Proof-of-Method Provenance
+
+#### Direct Proof Verification (Role D, `tools/verify_proof.sh`):
+1. Verifies that `executor_theorem` has the exact type of `frozen_target`:
    $$\text{isDefEq}(\text{type}(\texttt{executor\_theorem}), \text{type}(\texttt{frozen\_target}))$$
-   - Kernel definitional equality automatically resolves $\alpha$-renaming of bound variables, implicit binders, dependent $\Pi$-types, existentials, and equivalences without brittle text interpolation.
-2. **Fail-Closed Axiom Audit:**
-   Transitive axioms are extracted via `Lean.collectAxioms` and certified against the frozen whitelist:
-   $$A_{\text{observed}} \subseteq \{\texttt{propext}, \texttt{Classical.choice}, \texttt{Quot.sound}\}$$
-   Any proof depending on `sorryAx`, custom axioms, or unproved constants fails closed.
-3. **Fail-Closed Scan:**
-   Rejects forbidden tokens (`sorry`, `admit`, `native_decide`) prior to compilation.
+2. Verifies clean kernel axioms: $A \subseteq \{\texttt{propext}, \texttt{Classical.choice}, \texttt{Quot.sound}\}$ (zero `sorryAx`).
+3. Enforces exit code 0 and sentinel `VERIFICATION_SUCCESS`.
 
-### 4.3 Executor Specifications, Harness, & Pre-Freeze Smoke Test
-1. **Pinned Model Identities (No In-Flight Fallbacks):**
-   - **Primary Suite:** Anthropic `claude-sonnet-4-6` for S, D, and L.
-   - **Replication Suite:** OpenAI `gpt-5.6-sol` for S, D, and L.
-   - *Rule:* Pinned IDs are immutable. If an API endpoint is unavailable during the execution window, the run fails closed. A model migration requires a formal v0.5 candidate release, not an ambient fallback.
-2. **Cryptographic Execution Harness (`tools/executor_harness.py`):**
-   - Governs interaction turns, compiler feedback loop, and immutable logging.
-   - **Binding Budgets:**
-     - Role S: 3600 seconds wall-clock, max 15 interaction turns.
-     - Role D: 10800 seconds wall-clock, max 30 interaction turns.
-     - Role L: 10800 seconds wall-clock, max 30 interaction turns.
-   - Termination occurs strictly upon verified completion, turn exhaustion, or wall-clock expiration.
-3. **Context Isolation:**
-   - **Direct ($D$):** Target statement + admissibility manifest. Zero stub or search access.
-   - **Lifted ($L$):** Target statement + admissibility manifest + frozen `LIFT-FOUND` stub.
-4. **Mandatory Pre-Freeze API Smoke Test (`tools/smoke_test_executor.py`):**
-   Prior to human ratification (Gate 6), a live HTTP ping must be executed against both endpoints, verifying:
-   $$\text{verified} = (\text{http\_status} == 200) \land (\text{returned\_model\_id} == \text{pinned\_model\_id})$$
-   Recording verified accessibility into `tools/smoke_test_receipt.json`. Missing credentials or model mismatch fails the pre-freeze gate closed.
+#### Lifted Proof Verification & Provenance (Role L, `tools/VerifyLifted.lean` & `tools/verify_lifted.sh`):
+To prevent the lifted branch from bypassing the representation layer with an unlinked direct proof:
+1. **Immutable Specification Prefix:** Role L receives the frozen proof-free specification prefix from Role S (`LiftDom`, `LiftCod`, `liftT`, `invariant`, `BridgeProp`).
+2. **Proved Bridge & Exact Target Audit:**
+   - Role L must author:
+     ```lean
+     theorem preservation_bridge : BridgeProp := by ...
+     theorem executor_theorem : <target_type> := by ...
+     ```
+   - Verifies $\text{isDefEq}(\text{type}(\texttt{preservation\_bridge}), \texttt{BridgeProp})$.
+   - Verifies $\text{isDefEq}(\text{type}(\texttt{executor\_theorem}), \text{type}(\texttt{frozen\_target}))$.
+   - Axiom audit: Both proofs must be 100% complete and certified:
+     $$A(\texttt{preservation\_bridge}) \cup A(\texttt{executor\_theorem}) \subseteq \{\texttt{propext}, \texttt{Classical.choice}, \texttt{Quot.sound}\}$$
+3. **Proof-of-Method Provenance (Transitive Dependency Audit):**
+   - The Lean kernel recursively collects all declarations transitively referenced in `executor_theorem`'s proof body:
+     $$\text{preservation\_bridge} \in \text{Deps}^*(\texttt{executor\_theorem})$$
+   - Direct proofs or proofs that fail to transitively utilize `preservation_bridge` fail closed with:
+     $$\mathbf{LIFT\_NOT\_USED}$$
+4. **Enforces Sentinel:** Requires exit code 0 and exact sentinel `VERIFY_LIFTED_SENTINEL_OK`.
 
-### 4.4 Immutable Admissibility Manifest
-- **Method Mode (Primary):** Prohibits terminal target-equivalent library lemmas.
-  - Calibration Fibonacci: Prohibits `Int.fib_succ_mul_fib_pred_sub_fib_sq` and `Nat.fib_gcd`.
-  - Calibration Pell: Prohibits `Pell.Solution₁` generator theorems that solve the goal by definition.
-  - Calibration Roots of Unity: Prohibits `IsPrimitiveRoot.geom_sum_eq_zero`.
-- **Blind Manifest Gate:** Case-specific manifests are frozen **after** drand sampling but **prior** to launching proof attempts. Unforeseen lemmas are flagged as `PROTOCOL_AMBIGUITY` (original outcome stands; re-run strictly as sensitivity run).
+### 4.3 Infrastructure Resiliency, Timeouts, & Execution Harness
+
+1. **Centralized Configuration (`tools/executor_config.json`):**
+   - **Pinned Models:** `claude-sonnet-4-6` (Primary) and `gpt-5.6-sol` (Replication).
+   - **Output Token Ceiling:** 8192 tokens (eliminating token truncation bias against lifted proofs).
+   - **Sampling Parameters:** Temperature pinned to 0.0. Truncation flagged explicitly in transcript (`max_tokens_reached`).
+2. **Infrastructure Failure Governance (`INFRA_FAILURE`):**
+   - **Transport Retry Policy:** Up to 3 attempts per turn (1 original + 2 retries) for transient network timeouts or HTTP codes `[408, 429, 500, 502, 503, 504]`.
+   - **Deterministic Backoff:** 5 seconds after attempt 1; 15 seconds after attempt 2.
+   - **Accounting Rule:** Retries do **not** consume model turns, but consume wall-clock time and are logged in transcript.
+   - **Classification Rule:** Unrecoverable network errors or fatal HTTP 4xx terminate with status **`INFRA_FAILURE`**.
+   - **Scientific Rule:** `INFRA_FAILURE` is categorized as **`NOT_EVALUABLE_INFRA`**. It is **never** converted into `NEITHER`, nor counted as a mathematical or tool failure of the method. No resampling or model migration is permitted.
+3. **Hard Wall-Clock Enforcement:**
+   - Remaining time $t_{\text{rem}} = \text{deadline} - \text{now}$ is calculated at every turn.
+   - API request timeouts and Lean compilation timeouts are bounded by $t_{\text{rem}}$.
+   - Expiration terminates execution with **`TIMEOUT_WALLCLOCK`**.
+4. **Hash-Addressed Execution Receipt (`tools/execution_receipt.json`):**
+   Emits an immutable record containing role, model ID, file hashes, final status, turns consumed, elapsed wall-clock, and verified footprint tokens.
 
 ---
 
@@ -279,34 +278,24 @@ To guarantee that branches prove literally the assigned target theorem:
 
 ### 5.1 Primary Categorical Outcome
 For every problem evaluated, completion is recorded in the discrete registry:
-$$O_{\text{completion}} \in \{\text{BOTH}, \text{L-ONLY}, \text{D-ONLY}, \text{NEITHER}\}$$
+$$O_{\text{completion}} \in \{\text{BOTH}, \text{L-ONLY}, \text{D-ONLY}, \text{NEITHER}, \text{NOT\_EVALUABLE\_INFRA}\}$$
 
-- **`BOTH`:** Both branches successfully produced a verified proof of the literal target statement within the 3-hour budget.
+- **`BOTH`:** Both branches successfully produced a verified proof of the literal target statement within the 3-hour budget (with L verified through proof-of-method provenance).
 - **`L-ONLY`:** The lifted branch completed verification; the direct branch timed out or failed verification.
 - **`D-ONLY`:** The direct branch completed verification; the lifted branch timed out or failed verification.
 - **`NEITHER`:** Neither branch completed verification. (Retained as a valid descriptive outcome; never dropped from reporting).
+- **`NOT_EVALUABLE_INFRA`:** Declared if an unrecoverable infrastructure failure occurred.
 
 ### 5.2 Primary Quantitative Metric: Formalization Footprint
 Conditional **strictly** on $O_{\text{completion}} = \text{BOTH}$, the footprint differential is evaluated:
 $$\Delta W_{\text{token}} = W_L - W_D$$
 
-Where $W_{\text{token}}$ is the **normalized authored Lean lexical token count**:
-- Evaluated via `tools/count_lean_tokens.py` implementing Lean's lexical grammar.
-- Includes all newly authored code (for $L$: includes `bridge` + `representation` + `theorem`).
-- Strips comments, blank lines, whitespace, and `import` lines.
-- Invariant to formatting and whitespace variations.
-- Verified against 5 golden test fixtures in `fixtures/`.
-
-> **Metric Interpretation Disclaimer:**  
-> *$W_{\text{token}}$ measures artifact size under a fixed authoring protocol; it is not interpreted as human effort, cognitive difficulty, or semantic proof complexity.*
-
-### 5.3 Secondary Metrics
-Recorded alongside $W_{\text{token}}$:
-1. Number of newly introduced declarations / lemmas ($N_{\text{lemmas}}$).
-2. Number of interactive tactic invocations ($N_{\text{tactics}}$).
-3. Number of distinct Mathlib definitions referenced.
-4. Total model / solver tokens consumed.
-5. Elapsed wall-clock time to verification.
+Where $W_{\text{token}}$ is the **normalized authored Lean lexical token count** (`tools/count_lean_tokens.py`):
+- **For Direct Branch ($D$):**
+  $$W_D = W(\texttt{executor\_theorem})$$
+- **For Lifted Branch ($L$):** To ensure metric fidelity with the preregistered definition of lifting, $W_L$ is evaluated across the **full assembled final artifact**:
+  $$\boxed{ W_L = W(\text{frozen representation prefix} + \text{proved bridge} + \text{L helpers} + \text{target proof}) }$$
+- Strips comments, blank lines, whitespace, and `import` lines. Verified against 5 golden test fixtures in `fixtures/`.
 
 ---
 
@@ -322,9 +311,6 @@ For each predeclared family $\{T_1, T_2\}$ executed symmetrically in the same fi
    $$\Delta_L^{(2)} \le 0.50 \times \Delta_D^{(2)}$$
 2. **Cumulative Amortization:**
    $$W_L(T_1 + T_2) < W_D(T_1 + T_2)$$
-
-**Descriptive Prediction (P1):**
-- Setup Cost: $W_L(T_1) \ge W_D(T_1)$. (Recorded as a descriptive prediction of representation overhead, not a falsification criterion).
 
 **Evaluation Rules for H1:**
 - **Falsification of H1:** If $\Delta_L^{(2)} > 0.50 \times \Delta_D^{(2)}$ or if $W_L(T_1 + T_2) \ge W_D(T_1 + T_2)$, H1 is **REJECTED** for that family.
@@ -346,10 +332,34 @@ Evaluated according to the pre-frozen Control Outcome Matrix in Section 2.3:
 
 ## 7. Execution Checklist & Pre-Freeze Gates
 
-- [ ] **Gate 0:** Repository initialized at `https://github.com/VolMax-Studio/representation-lifting-s1`.
+- [ ] **Gate 0:** Repository initialized at `https://github.com/VolMax-Studio/representation-lifting-s1` with checked-in Lake project (`lean-toolchain`, `lakefile.toml`, `lake-manifest.json`).
 - [ ] **Gate 1:** Mechanical nontriviality script (`tools/nontriviality_filter.sh`) executed on ProofNet-Verified (367 base items).
 - [ ] **Gate 2:** Verbatim Lean 4 v4.34.0 compilation filter executed; `EXCLUDED_TOOLCHAIN_INCOMPATIBLE.tsv` generated with exact compiler diagnostics.
 - [ ] **Gate 3:** `POOL.tsv` compiled, sorted, and canonical SHA-256 published.
 - [ ] **Gate 4:** Target drand round committed via `tools/drand_schedule.py` ($r_{\text{scheduled}} = \lfloor (u - 1692803367)/3 \rfloor + 2$ with $u = t_{\text{pub}} + 600$).
-- [ ] **Gate 5:** Live API Smoke Test executed (`tools/smoke_test_executor.py`), recording HTTP 200 and model ID match into `tools/smoke_test_receipt.json`.
+- [ ] **Gate 5:** Live API Smoke Test executed (`tools/smoke_test_executor.py`), recording HTTP 200 and exact model ID match into `tools/smoke_test_receipt.json`.
 - [ ] **Gate 6:** Human Ratification by Ivan Nestorov prior to the scheduled publication timestamp of the drand round.
+
+---
+
+## 8. Protocol Amendment History
+
+- **Amendment 0.1 $\to$ 0.2:**
+  - Added $+2$ future round offset to drand schedule to eliminate publication race condition.
+  - Formalized exact target type equivalence via Lean kernel `isDefEq`.
+  - Added Negative Control outcome matrix and ControlGnomonStub.
+- **Amendment 0.2 $\to$ 0.3:**
+  - Replaced text regex checking with pure Lean 4 kernel meta-checkers (`CheckBridge.lean`, `VerifyTarget.lean`).
+  - Formalized discrete Role S search executor and live API smoke test.
+- **Amendment 0.3 $\to$ 0.4:**
+  - Corrected Identity Guard from declaration type comparison to value-level definitional equality (`mkConst domName` vs `mkConst codName` and `@id LiftDom`).
+  - Added sequential dependent binder type matching with `replaceFVars`.
+  - Added representation layer axiom whitelist rejecting `sorryAx` and custom axioms in definitions.
+  - Implemented top-level import hoisting.
+- **Amendment 0.4 $\to$ 0.5 (Current):**
+  - **Identity Guard Semantics:** Formally recorded amendment from v0.1 OR semantics to AND semantics before freeze. An endomorphism $X \to X$ (such as $n \mapsto n+1$) is a legitimate representation lift; rejecting it solely for domain equality is mathematically unsound. AND semantics strictly rejects true trivial identity liftings ($LiftDom \equiv LiftCod \land liftT \equiv @id$).
+  - **Proof-of-Method Provenance:** Replaced unproved bridge theorem in Role S with proof-free specification `BridgeProp : Prop`. Created `tools/VerifyLifted.lean` requiring Role L to prove `BridgeProp` with certified kernel axioms and enforcing transitive constant dependency: $\text{preservation\_bridge} \in \text{Deps}^*(\texttt{executor\_theorem})$. Rejects unlinked direct proofs with `LIFT_NOT_USED`.
+  - **Metric Binding for $W_L$:** Formally bound $W_L$ to the full assembled final artifact (frozen prefix + proved bridge + L helpers + target proof).
+  - **Pinned Lake Project:** Checked in `lean-toolchain`, `lakefile.toml`, `lake-manifest.json` pinned to Lean v4.34.0 and Mathlib `5ed29652…`. Enforced `lake env lean` with fail-closed `ENVIRONMENT_INVALID`. Added Mathlib test fixtures.
+  - **Infrastructure Resilience:** Formally specified 3 transport attempts with deterministic backoff (5s, 15s) for retryable HTTP/network errors. Classified attempt exhaustion as `INFRA_FAILURE` / `NOT_EVALUABLE_INFRA`. Hard wall-clock timeout enforced across all API and subprocess calls.
+  - **Execution Configuration:** Created `tools/executor_config.json` freezing 8192 token ceiling, temperature 0.0, and strict model ID equality.

@@ -2,16 +2,16 @@
 """
 tools/check_bridge.py
 Lean-native representation stub and bridge verification harness.
-Invokes tools/CheckBridge.lean in the Lean kernel/MetaM environment.
+Invokes tools/CheckBridge.lean in the pinned Lake/Lean kernel environment.
 Enforces:
-1. Extraction of top-level imports to the head of the file.
-2. Lean compilation of the representation stub.
-3. Axiom audit on representation layer (no sorryAx, no custom axioms).
+1. Strict requirement for pinned Lake environment (lean-toolchain, lakefile.toml, lake-manifest.json).
+2. Extraction of top-level imports to the head of the file.
+3. Elaboration and pure-kernel axiom audit of BridgeProp (zero sorryAx).
 4. Identity Guard (AND semantics: LiftDom = LiftCod AND liftT = id).
 5. Sequential dependent binder type matching.
 6. Target linkage and AST constant reference to liftT.
 7. Verification of exact sentinel: CHECK_BRIDGE_SENTINEL_OK.
-Part of representation-lifting-s1 experimental protocol.
+Part of representation-lifting-s1 experimental protocol (v0.5).
 """
 
 import sys
@@ -22,6 +22,7 @@ import tempfile
 import shutil
 
 TOOLS_DIR = os.path.abspath(os.path.dirname(__file__))
+PROJECT_ROOT = os.path.abspath(os.path.join(TOOLS_DIR, ".."))
 CHECK_BRIDGE_LEAN = os.path.join(TOOLS_DIR, "CheckBridge.lean")
 
 SENTINEL = "CHECK_BRIDGE_SENTINEL_OK"
@@ -37,10 +38,12 @@ def extract_imports_and_body(text: str) -> tuple[list[str], str]:
     return imports, "\n".join(body_lines)
 
 def verify_bridge_with_lean(target_file: str, stub_file: str) -> tuple[bool, str]:
-    lean_bin = shutil.which("lean")
-    if not lean_bin:
-        raise FileNotFoundError("'lean' required. Pinned Lean toolchain is missing from PATH.")
-        
+    # 1. Strict environment audit: Require pinned Lake project
+    req_files = ["lean-toolchain", "lakefile.toml", "lake-manifest.json"]
+    for rf in req_files:
+        if not os.path.isfile(os.path.join(PROJECT_ROOT, rf)):
+            return False, f"ENVIRONMENT_INVALID: Required pinned file '{rf}' missing in {PROJECT_ROOT}."
+
     with open(target_file, "r", encoding="utf-8") as f:
         target_content = f.read()
     with open(stub_file, "r", encoding="utf-8") as f:
@@ -72,10 +75,10 @@ def verify_bridge_with_lean(target_file: str, stub_file: str) -> tuple[bool, str
             f.write("\n\n-- Candidate stub\n")
             f.write(s_body)
             f.write("\n\n-- Run verification\n")
-            f.write("#eval runCheckBridge `frozen_target `preservation_bridge `liftT `LiftDom `LiftCod\n")
+            f.write("#eval runCheckBridge `frozen_target `BridgeProp `liftT `LiftDom `LiftCod\n")
             
-        cmd = ["lake", "env", "lean", harness_file] if shutil.which("lake") and os.path.exists("lakefile.toml") else ["lean", harness_file]
-        res = subprocess.run(cmd, capture_output=True, text=True)
+        cmd = ["lake", "env", "lean", harness_file]
+        res = subprocess.run(cmd, cwd=PROJECT_ROOT, capture_output=True, text=True)
         
         output = (res.stdout + "\n" + res.stderr).strip()
         
@@ -98,12 +101,8 @@ def main():
     stub_file = sys.argv[2]
     
     valid, message = verify_bridge_with_lean(target_file, stub_file)
-    if valid:
-        print(f"PASS: {message}")
-        sys.exit(0)
-    else:
-        print(f"FAIL: {message}")
-        sys.exit(1)
+    print(message)
+    sys.exit(0 if valid else 1)
 
 if __name__ == "__main__":
     main()

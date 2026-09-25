@@ -1,7 +1,7 @@
 /-
 calibration/ControlGnomonStub.lean
 Pre-frozen lifted representation stub for Negative Control: sum of odd numbers = n^2.
-Part of the representation-lifting-s1 experimental protocol.
+Part of the representation-lifting-s1 experimental protocol (v0.5).
 -/
 
 import Mathlib
@@ -17,8 +17,8 @@ def liftT (n : LiftDom) : LiftCod :=
 def invariant (s : LiftCod) : ℕ :=
   s.card
 
-/-- Preservation bridge linking target summation identity to decomposition of liftT n -/
-theorem preservation_bridge_sum_odd_sq (n : ℕ) :
+/-- Preservation bridge property linking target summation identity to decomposition of liftT n -/
+def BridgeProp : Prop :=
+  ∀ (n : ℕ),
     (∑ k ∈ Finset.range n, (2 * k + 1) = n^2) ↔
-    (invariant (liftT n) = n^2 ∧ invariant (liftT n) = ∑ k ∈ Finset.range n, (2 * k + 1)) := by
-  sorry
+    (invariant (liftT n) = n^2 ∧ invariant (liftT n) = ∑ k ∈ Finset.range n, (2 * k + 1))

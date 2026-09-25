@@ -4,10 +4,10 @@ tools/smoke_test_executor.py
 Active API smoke test for representation-lifting-s1 pinned executors:
 - Primary: Anthropic claude-sonnet-4-6
 - Replication: OpenAI gpt-5.6-sol
-Executes real minimal HTTP requests via standard library (urllib.request) to verify:
+Executes real minimal HTTP requests using frozen sampling parameters in tools/executor_config.json to verify:
 1. Valid API credentials
 2. HTTP 200 OK
-3. Returned model identity matches pinned specification
+3. Exact returned model identity match (returned_id == pinned_model_id)
 4. Records round-trip latency into tools/smoke_test_receipt.json.
 Fail-closed: Returns exit code 1 if either model is inaccessible or unverified.
 Part of representation-lifting-s1 experimental protocol.
@@ -21,40 +21,15 @@ import urllib.request
 import urllib.error
 from datetime import datetime, timezone
 
-RECEIPT_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "smoke_test_receipt.json"))
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "executor_config.json")
+RECEIPT_PATH = os.path.join(os.path.dirname(__file__), "smoke_test_receipt.json")
 
-PRIMARY_SPEC = {
-    "provider": "Anthropic",
-    "pinned_model_id": "claude-sonnet-4-6",
-    "endpoint": "https://api.anthropic.com/v1/messages",
-    "env_var": "ANTHROPIC_API_KEY",
-    "headers": {
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json"
-    },
-    "payload": {
-        "model": "claude-sonnet-4-6",
-        "max_tokens": 10,
-        "messages": [{"role": "user", "content": "Respond with 1."}]
-    }
-}
+def load_config() -> dict:
+    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-REPLICATION_SPEC = {
-    "provider": "OpenAI",
-    "pinned_model_id": "gpt-5.6-sol",
-    "endpoint": "https://api.openai.com/v1/chat/completions",
-    "env_var": "OPENAI_API_KEY",
-    "headers": {
-        "content-type": "application/json"
-    },
-    "payload": {
-        "model": "gpt-5.6-sol",
-        "max_tokens": 10,
-        "messages": [{"role": "user", "content": "Respond with 1."}]
-    }
-}
-
-def test_endpoint(spec: dict) -> dict:
+def test_endpoint(model_id: str, spec: dict) -> dict:
     key = os.environ.get(spec["env_var"])
     record = {
         "provider": spec["provider"],
@@ -73,10 +48,22 @@ def test_endpoint(spec: dict) -> dict:
     headers = dict(spec["headers"])
     if spec["provider"] == "Anthropic":
         headers["x-api-key"] = key
+        payload = {
+            "model": spec["pinned_model_id"],
+            "max_tokens": 10,
+            "temperature": spec["sampling_parameters"]["temperature"],
+            "messages": [{"role": "user", "content": "Respond with 1."}]
+        }
     else:
         headers["Authorization"] = f"Bearer {key}"
+        payload = {
+            "model": spec["pinned_model_id"],
+            "max_tokens": 10,
+            "temperature": spec["sampling_parameters"]["temperature"],
+            "messages": [{"role": "user", "content": "Respond with 1."}]
+        }
         
-    data = json.dumps(spec["payload"]).encode("utf-8")
+    data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(spec["endpoint"], data=data, headers=headers, method="POST")
     
     start_time = time.perf_counter()
@@ -89,8 +76,8 @@ def test_endpoint(spec: dict) -> dict:
             returned_id = body.get("model")
             record["returned_model_id"] = returned_id
             
-            # Require exact model ID or approved provider snapshot prefix
-            model_matched = (returned_id == spec["pinned_model_id"]) or (returned_id and returned_id.startswith(spec["pinned_model_id"]))
+            # Require exact model ID equality (no fuzzy prefix or alias fallback)
+            model_matched = (returned_id == spec["pinned_model_id"])
             record["verified_accessible"] = (resp.status == 200) and model_matched
             if resp.status == 200 and not model_matched:
                 record["error"] = f"MODEL_ID_MISMATCH: Pinned '{spec['pinned_model_id']}', but endpoint returned '{returned_id}'."
@@ -98,41 +85,60 @@ def test_endpoint(spec: dict) -> dict:
         record["http_status"] = e.code
         record["error"] = f"HTTPError {e.code}: {e.read().decode('utf-8', errors='replace')[:200]}"
     except Exception as e:
-        record["error"] = str(e)
+        record["error"] = f"{type(e).__name__}: {str(e)}"
         
     return record
 
-def main():
-    now_utc = datetime.now(timezone.utc).isoformat()
-    primary_res = test_endpoint(PRIMARY_SPEC)
-    replication_res = test_endpoint(REPLICATION_SPEC)
+def run_smoke_tests() -> bool:
+    print("=" * 60)
+    print("representation-lifting-s1: LIVE PRE-FREEZE API SMOKE TEST")
+    print(f"Timestamp: {datetime.now(timezone.utc).isoformat()}")
+    print("=" * 60)
     
+    config = load_config()
+    models = config["pinned_models"]
+    
+    results = {}
+    all_passed = True
+    
+    for model_key in ["claude-sonnet-4-6", "gpt-5.6-sol"]:
+        spec = models[model_key]
+        print(f"\n[PROBING] {spec['provider']} -> {spec['pinned_model_id']} ({spec['endpoint']})...")
+        res = test_endpoint(model_key, spec)
+        results[model_key] = res
+        
+        status_str = "PASS" if res["verified_accessible"] else "FAIL"
+        print(f"  Result: {status_str}")
+        print(f"  HTTP Status: {res['http_status']}")
+        print(f"  Returned Model ID: {res['returned_model_id']}")
+        print(f"  Round-trip Latency: {res['latency_ms']} ms")
+        if res["error"]:
+            print(f"  Diagnostic: {res['error']}")
+            all_passed = False
+        else:
+            print("  Access verified and certified.")
+            
     receipt = {
-        "timestamp_utc": now_utc,
-        "protocol": "representation-lifting-s1/v0.4",
-        "executors": {
-            "primary": primary_res,
-            "replication": replication_res
-        }
+        "schema_version": "v0.5",
+        "receipt_type": "hash_addressed_execution_receipt",
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "all_endpoints_verified": all_passed,
+        "results": results
     }
     
     with open(RECEIPT_PATH, "w", encoding="utf-8") as f:
         json.dump(receipt, f, indent=2)
         f.write("\n")
         
-    print(f"Receipt written to {RECEIPT_PATH}")
-    
-    # Gate check: for scientific freeze ratification, credentials must be active
-    if primary_res["verified_accessible"] and replication_res["verified_accessible"]:
-        print("PASS: Both primary and replication executors successfully verified.")
-        sys.exit(0)
+    print("\n" + "=" * 60)
+    print(f"Receipt written to: {RECEIPT_PATH}")
+    if all_passed:
+        print("ALL PINNED EXECUTOR ENDPOINTS VERIFIED ACCESSIBLE.")
+        return True
     else:
-        print("FAIL_CLOSED: Pre-freeze executor smoke test failed. Missing credentials or endpoint error:")
-        if not primary_res["verified_accessible"]:
-            print(f"  Primary ({PRIMARY_SPEC['pinned_model_id']}): {primary_res['error']}")
-        if not replication_res["verified_accessible"]:
-            print(f"  Replication ({REPLICATION_SPEC['pinned_model_id']}): {replication_res['error']}")
-        sys.exit(1)
+        print("PRE-FREEZE SMOKE TEST FAILED CLOSED: One or more models unavailable or credentials missing.")
+        return False
 
 if __name__ == "__main__":
-    main()
+    success = run_smoke_tests()
+    sys.exit(0 if success else 1)

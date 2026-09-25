@@ -6,6 +6,8 @@ build/
 *.o
 __pycache__/
 *.pyc
+.pytest_cache/
+tools/execution_receipt_*.json
 .DS_Store
 *.swp
 *.tmp
