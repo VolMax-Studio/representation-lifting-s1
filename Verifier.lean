@@ -109,8 +109,20 @@ def runVerifyTarget (candModName frozenTargetName : Name) (executorShortName : S
   if !(← isDefEq targetType executorType) then
     throwError m!"TYPE_MISMATCH: Executor theorem type does not match frozen target type:\n  Expected: {targetType}\n  Received: {executorType}"
 
-  -- 5. Fail-Closed Axiom Audit
-  let axioms ← Lean.collectAxioms executorResolved
+  -- 5. Mechanical Target Verification & Kernel Replay via addDecl
+  let checkName := `VerifierTrustCore.d_check
+  let levels := targetDecl.levelParams.map Level.param
+  let proof := mkConst executorResolved levels
+  let decl := Declaration.thmDecl {
+    name := checkName
+    levelParams := targetDecl.levelParams
+    type := targetDecl.type
+    value := proof
+  }
+  addDecl decl
+
+  -- 6. Fail-Closed Axiom Audit on kernel-checked declaration
+  let axioms ← Lean.collectAxioms checkName
   let allowedAxioms : List Name := [`propext, `Classical.choice, `Quot.sound]
   
   for ax in axioms do
@@ -121,6 +133,7 @@ def runVerifyTarget (candModName frozenTargetName : Name) (executorShortName : S
     ("module_found", true),
     ("method_mode", true),
     ("type_match", true),
+    ("kernel_checked", true),
     ("axioms", true)
   ]
   return mkJson "PASS" "target" (toString candModName) checks

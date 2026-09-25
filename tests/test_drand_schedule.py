@@ -7,7 +7,8 @@ Verifies boundary conditions, synthetic parameters, and structural invariants.
 
 import sys
 import os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, ROOT_DIR)
 
 from tools.drand_schedule import compute_scheduled_round, round_time, GENESIS_TIME, PERIOD_SECONDS
 
@@ -81,9 +82,25 @@ def test_invariant_grid():
         assert t_prev <= u < t_curr, f"Failed at dt={dt}: not ({t_prev} <= {u} < {t_curr})"
     print("test_invariant_grid: PASS (1000 points checked)")
 
+def test_quicknet_constants():
+    import json
+    import hashlib
+    root_path = os.path.join(ROOT_DIR, "external_roots", "drand_quicknet_info.json")
+    with open(root_path, "rb") as f:
+        content = f.read()
+    assert hashlib.sha256(content).hexdigest() == "7054e0f425907deee8f5a0dfc112c5a1a040914fa1ebb139285b57cdd9d6ead3"
+    info = json.loads(content.decode("utf-8"))
+    
+    from tools.drand_schedule import QUICKNET_CHAIN_HASH, GENESIS_TIME, PERIOD_SECONDS
+    assert QUICKNET_CHAIN_HASH == info["hash"]
+    assert GENESIS_TIME == info["genesis_time"]
+    assert PERIOD_SECONDS == info["period"]
+    print("test_quicknet_constants: PASS (verified against archived /info root)")
+
 if __name__ == "__main__":
     test_synthetic_parameters()
     test_exact_boundary_conditions()
     test_quicknet_known_round()
     test_invariant_grid()
+    test_quicknet_constants()
     print("ALL DRAND SCHEDULE REGRESSION TESTS PASSED.")

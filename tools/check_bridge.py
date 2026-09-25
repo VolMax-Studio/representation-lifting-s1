@@ -40,9 +40,9 @@ SENTINEL = "CHECK_BRIDGE_SENTINEL_OK"
 
 FORBIDDEN_PATTERN = re.compile(
     r'(^|[^a-zA-Z0-9_`])(sorry|admit)([^a-zA-Z0-9_`]|$)|'
-    r'native_decide|^\s*axiom\b|^\s*run_cmd\b|^\s*#eval\b|^\s*initialize\b|'
-    r'^\s*unsafe\b|^\s*elab\b|^\s*macro\b|^\s*syntax\b|'
-    r'set_option\s+debug\.|@\[implemented_by\b|IO\.FS\b|IO\.Process\b|\bVerifierTrustCore\b',
+    r'native_decide|^\s*axiom\b|^\s*run_cmd\b|^\s*run_elab\b|^\s*#eval\b|^\s*initialize\b|'
+    r'^\s*unsafe\b|^\s*elab\b|^\s*elab_rules\b|^\s*macro\b|^\s*macro_rules\b|^\s*syntax\b|'
+    r'set_option\s+debug\.|@\[implemented_by\b|\bopen\s+IO\b|IO\.FS\b|IO\.Process\b|\breadFile\b|\bVerifierTrustCore\b',
     re.MULTILINE
 )
 

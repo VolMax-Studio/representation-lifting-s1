@@ -12,3 +12,4 @@ tools/execution_receipt_*.json
 *.swp
 *.tmp
 tmp/
+*.zip

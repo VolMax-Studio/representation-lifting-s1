@@ -4,7 +4,8 @@ Pre-frozen lifted representation stub for Negative Control: sum of odd numbers =
 Part of the representation-lifting-s1 experimental protocol (v0.6).
 -/
 
-import Mathlib
+import Mathlib.Data.Finset.Basic
+import Mathlib.Algebra.BigOperators.Intervals
 
 abbrev LiftDom := ℕ
 abbrev LiftCod := Finset (ℕ × ℕ)

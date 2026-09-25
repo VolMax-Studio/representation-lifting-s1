@@ -119,8 +119,8 @@ def test_verify_proof():
         res_elab = subprocess.run([VERIFY_SCRIPT, target_file, elab_hijack, "candidate_fake_thm"],
                                   capture_output=True, text=True)
         assert res_elab.returncode != 0, "Expected FAIL for elab_rules hijack candidate, got returncode 0"
-        assert "VERIFICATION_FAILED" in res_elab.stderr or "VERIFICATION_FAILED" in res_elab.stdout
-        print("test_verify_proof (adversarial elab_rules hijack rejected under compiled verifier): PASS")
+        assert "VERIFICATION_FAILED" in res_elab.stderr or "FAIL_CLOSED" in res_elab.stderr or "VERIFICATION_FAILED" in res_elab.stdout
+        print("test_verify_proof (adversarial elab_rules hijack rejected): PASS")
 
         # 12. Adversarial macro_rules syntax hijack
         # Invariant: Malicious syntax macro registers successfully, leanchecker passes,
@@ -129,8 +129,8 @@ def test_verify_proof():
         res_macro = subprocess.run([VERIFY_SCRIPT, target_file, macro_hijack, "candidate_fake_thm"],
                                    capture_output=True, text=True)
         assert res_macro.returncode != 0, "Expected FAIL for macro_rules hijack candidate, got returncode 0"
-        assert "VERIFICATION_FAILED" in res_macro.stderr or "VERIFICATION_FAILED" in res_macro.stdout
-        print("test_verify_proof (adversarial macro_rules hijack rejected under compiled verifier): PASS")
+        assert "VERIFICATION_FAILED" in res_macro.stderr or "FAIL_CLOSED" in res_macro.stderr or "VERIFICATION_FAILED" in res_macro.stdout
+        print("test_verify_proof (adversarial macro_rules hijack rejected): PASS")
 
 if __name__ == "__main__":
     test_verify_proof()

@@ -1,5 +1,7 @@
 {
-  "protocol_version": "v0.6",
+  "schema_version": "representation-lifting-executor-config/v1",
+  "primary_model_id": "claude-sonnet-4-6",
+  "replication_model_id": "gpt-5.6-sol",
   "pinned_models": {
     "claude-sonnet-4-6": {
       "provider": "Anthropic",

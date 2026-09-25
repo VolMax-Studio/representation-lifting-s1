@@ -44,7 +44,7 @@ if [ ! -f "$PROJECT_ROOT/lean-toolchain" ] || [ ! -f "$PROJECT_ROOT/lakefile.tom
 fi
 
 # 2. Defense-in-depth static security scan
-FORBIDDEN_PATTERN='(^|[^[:alnum:]_`])(sorry|admit)([^[:alnum:]_`]|$)|native_decide|^[[:space:]]*axiom\b|^[[:space:]]*run_cmd\b|^[[:space:]]*#eval\b|^[[:space:]]*initialize\b|^[[:space:]]*unsafe\b|^[[:space:]]*elab\b|^[[:space:]]*macro\b|^[[:space:]]*syntax\b|set_option[[:space:]]+debug\.|@\[implemented_by\b|IO\.FS\b|IO\.Process\b|\bVerifierTrustCore\b'
+FORBIDDEN_PATTERN='(^|[^[:alnum:]_`])(sorry|admit)([^[:alnum:]_`]|$)|native_decide|^[[:space:]]*axiom\b|^[[:space:]]*run_cmd\b|^[[:space:]]*run_elab\b|^[[:space:]]*#eval\b|^[[:space:]]*initialize\b|^[[:space:]]*unsafe\b|^[[:space:]]*elab\b|^[[:space:]]*elab_rules\b|^[[:space:]]*macro\b|^[[:space:]]*macro_rules\b|^[[:space:]]*syntax\b|set_option[[:space:]]+debug\.|@\[implemented_by\b|\bopen[[:space:]]+IO\b|IO\.FS\b|IO\.Process\b|\breadFile\b|\bVerifierTrustCore\b'
 if grep -En "$FORBIDDEN_PATTERN" "$EXECUTOR_LEAN_FILE" >/dev/null 2>&1; then
     echo "FAIL_CLOSED: Forbidden command/meta-programming/escape token detected in $EXECUTOR_LEAN_FILE" >&2
     exit 1

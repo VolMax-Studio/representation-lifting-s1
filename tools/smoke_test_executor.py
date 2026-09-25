@@ -119,7 +119,7 @@ def run_smoke_tests() -> bool:
             print("  Access verified and certified.")
             
     receipt = {
-        "schema_version": "v0.5",
+        "schema_version": "representation-lifting-execution-receipt/v1",
         "receipt_type": "hash_addressed_execution_receipt",
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "all_endpoints_verified": all_passed,

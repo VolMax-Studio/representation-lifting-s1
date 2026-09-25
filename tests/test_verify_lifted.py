@@ -122,16 +122,16 @@ theorem lifted_theorem : LiftedClaim := by
     res6 = subprocess.run([VERIFY_LIFTED_SCRIPT, target, stub, elab_hijack],
                           capture_output=True, text=True)
     assert res6.returncode != 0, f"Expected FAIL for elab_rules hijack in lifted verification, got returncode 0"
-    assert "VERIFY_LIFTED_FAILED" in res6.stderr or "VERIFY_LIFTED_FAILED" in res6.stdout
-    print("test_verify_lifted (adversarial elab_rules hijack rejected under compiled verifier): PASS")
+    assert "VERIFY_LIFTED_FAILED" in res6.stderr or "FAIL_CLOSED" in res6.stderr or "VERIFY_LIFTED_FAILED" in res6.stdout
+    print("test_verify_lifted (adversarial elab_rules hijack rejected): PASS")
 
     # 7. Adversarial macro_rules syntax hijack
     macro_hijack = os.path.join(ROOT_DIR, "fixtures", "security", "macro_rules_eval_hijack.lean")
     res7 = subprocess.run([VERIFY_LIFTED_SCRIPT, target, stub, macro_hijack],
                           capture_output=True, text=True)
     assert res7.returncode != 0, f"Expected FAIL for macro_rules hijack in lifted verification, got returncode 0"
-    assert "VERIFY_LIFTED_FAILED" in res7.stderr or "VERIFY_LIFTED_FAILED" in res7.stdout
-    print("test_verify_lifted (adversarial macro_rules hijack rejected under compiled verifier): PASS")
+    assert "VERIFY_LIFTED_FAILED" in res7.stderr or "FAIL_CLOSED" in res7.stderr or "VERIFY_LIFTED_FAILED" in res7.stdout
+    print("test_verify_lifted (adversarial macro_rules hijack rejected): PASS")
 
 if __name__ == "__main__":
     test_verify_lifted()
