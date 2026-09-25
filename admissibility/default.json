@@ -1,0 +1,6 @@
+{
+  "mode": "Method",
+  "case": "default",
+  "description": "Default admissibility policy for problems without specific terminal library exemptions.",
+  "prohibited_constants": []
+}

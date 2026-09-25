@@ -3,7 +3,8 @@
 **Scientific Investigation Track:** Formal Representation Lifting & Structural Boundary Audit  
 **Author / Principal Investigator:** Ivan Nestorov  
 **Repository:** [https://github.com/VolMax-Studio/representation-lifting-s1](https://github.com/VolMax-Studio/representation-lifting-s1)  
-**Toolchain Target:** Lean 4 (v4.34.0) / Mathlib v4.34.0  
+**Toolchain Target:** Lean 4 (v4.34.0) / Mathlib v4.34.0 (commit `5ed2965256430c3649e86755f9576b54eca72435`)  
+**Preregistration Specification:** [PREREGISTRATION_v0.6_CANDIDATE.md](file:///home/volmax-studio/volmax-projects/iot2/PORTFOLIO/representation-lifting-s1/PREREGISTRATION_v0.6_CANDIDATE.md)
 
 ---
 
@@ -19,39 +20,55 @@ This repository hosts the formal preregistration, tooling, calibration fixtures,
 
 ---
 
-## Directory Structure
+## Setup & Mathlib Cache for Independent Verification
 
-```
-.
-├── PREREGISTRATION_v0.1_CANDIDATE.md  # Comprehensive preregistration specification
-├── tools/
-│   ├── count_lean_tokens.py          # Deterministic Lean 4 lexical token counter
-│   ├── select_indices.py             # drand quicknet rejection-sampling script
-│   ├── nontriviality_filter.sh       # 4-tactic mechanical nontriviality test
-│   └── verify_proof.sh               # Fail-closed literal target & axiom verifier
-├── fixtures/                         # Golden test fixtures for tokenizer verification
-│   ├── nested_comments.lean
-│   ├── quoted_identifiers.lean
-│   ├── unicode_symbols.lean
-│   ├── strings_with_comments.lean
-│   └── escaped_strings.lean
-└── calibration/                      # Pre-frozen calibration & control stubs
-    └── ControlGnomonStub.lean        # Pre-frozen Negative Control gnomon stub
+To set up and verify this project on a clean machine:
+
+1. **Prerequisites:** Ensure `elan` and Lean 4 are installed.
+2. **Fetch Pinned Dependencies:**
+   ```bash
+   lake update
+   ```
+3. **Download Precompiled Mathlib Oleans:**
+   Because `lake-manifest.json` locks Mathlib to commit `5ed2965256430c3649e86755f9576b54eca72435`, run:
+   ```bash
+   lake exe cache get
+   ```
+   This automatically downloads and decompresses the precompiled `.olean` files directly from `https://cache.mathlib.org/mathlib4`, enabling instant elaboration without local compilation.
+
+---
+
+## Running Test Suites
+
+All regression test suites run deterministically without external API dependencies:
+
+```bash
+python3 tests/test_check_bridge.py      # Verifies 12 bridge fixture branches and Identity Guard
+python3 tests/test_verify_proof.py      # Verifies direct proof verification, binder matching, and Mathlib targets
+python3 tests/test_verify_lifted.py     # Verifies structural lift, non-circularity, and dead bridge cheat rejection
+python3 tests/test_executor_harness.py  # Verifies state machine loops, truncation handling, and H1 calibration
+python3 tests/test_drand_schedule.py    # Verifies drand quicknet future-round invariants across 1000 grid points
 ```
 
 ---
 
-## Preregistration Status
+## Architecture & Governance (v0.6)
 
-The current preregistration is under **Byte-Level Text/Procedure Gate Review** (`PREREGISTRATION_v0.5_CANDIDATE.md`).
-All gate blockers have been resolved with pure Lean 4 kernel/MetaM checkers:
-1. Pure Lean exact target match and fail-closed axiom audit (`tools/VerifyTarget.lean` + `tools/verify_proof.sh`).
-2. Pure Lean representation search verification (`tools/CheckBridge.lean` + `tools/check_bridge.py`), verifying proof-free `BridgeProp`, AND Identity Guard, sequential dependent binders, and representation axiom whitelist without `sorryAx`.
-3. Proof-of-Method Provenance for Role L (`tools/VerifyLifted.lean` + `tools/verify_lifted.sh`): verifies exact target match, clean axioms, and kernel transitive dependency `preservation_bridge ∈ Deps*(executor_theorem)`. Rejects unlinked direct proofs with `LIFT_NOT_USED`.
-4. Assembled Footprint Metric Binding: $W_L = W(\text{frozen representation prefix} + \text{proved bridge} + \text{L helpers} + \text{target proof})$.
-5. Pinned Lake Project (`lean-toolchain`, `lakefile.toml`, `lake-manifest.json` pinned to Lean v4.34.0 and Mathlib `5ed29652…`). Tools enforce `lake env lean` and fail closed on `ENVIRONMENT_INVALID`.
-6. Infrastructure Resilience & Classification (`tools/executor_config.json` + `tools/executor_harness.py`): up to 3 transport attempts with deterministic backoff (5s, 15s) for transient HTTP/network errors. Classified as `INFRA_FAILURE` / `NOT_EVALUABLE_INFRA`. Hard wall-clock timeout enforced across all turns.
-7. Pinned model identities (`claude-sonnet-4-6` primary, `gpt-5.6-sol` replication) and live pre-freeze API smoke test (`tools/smoke_test_executor.py`) with strict model ID equality.
-8. Symmetric H1 amortization formula ($\Delta_L^{(2)}$ vs $\Delta_D^{(2)}$ executed sequentially in the same file).
-9. drand quicknet future-round formula ($r = \lfloor (u - 1692803367)/3 \rfloor + 2$ with $u = t_{\text{pub}} + 600$) with verified structural invariants.
-
+1. **Method Mode Machine-Readable Deny-Lists (`admissibility/*.json`):**
+   - Method Mode is the primary experimental regime. Models cannot query pre-packaged terminal lemmas (`Int.fib_succ_mul_fib_pred_sub_fib_sq`, `Nat.fib_gcd`, `Pell.Solution₁`, `IsPrimitiveRoot.geom_sum_eq_zero`).
+   - The verifier (`checkDirectProhibited`) scans direct constant references in all newly authored candidate declarations (`NameSet`), without scanning transitively into Mathlib internals to prevent false rejections.
+2. **Structural Lift Architecture:**
+   - Role S defines representation types (`LiftDom`, `LiftCod`), representation map (`liftT`), closed proposition `LiftedClaim : Prop`, and specification `BridgeProp : Prop`.
+   - Role L authors only `preservation_bridge : BridgeProp` and `lifted_theorem : LiftedClaim`.
+   - Target theorem `executor_theorem` is mechanically synthesized by the trusted verifier:
+     `fun xs => (preservation_bridge xs).mpr (lifted_theorem xs)`.
+   - Non-circularity is strictly audited: `preservation_bridge ∉ Deps(lifted_theorem)`.
+3. **Sequential Multi-Theorem Calibration State Machine (H1):**
+   - `run_calibration_family` executes sequential $T_1 \to T_2$ runs in the same source context for both branches.
+   - Evaluates the H1 marginal dividend test: $\Delta_L^{(2)} \le 0.50 \times \Delta_D^{(2)}$.
+4. **Metric Definition Alignment:**
+   - Direct: $W_D = W(\text{all newly authored candidate declarations required for proof})$.
+   - Lifted: $W_L = W(\text{frozen representation prefix} + \text{proved bridge} + \text{lifted theorem})$.
+5. **API Timeout & Truncation Normalization:**
+   - Request timeout: 600s in `tools/executor_config.json` (eliminating length bias against Role L).
+   - Responses cut off by token limit are normalized to `OUTPUT_TRUNCATED`.

@@ -6,23 +6,24 @@
 # 3. Combines frozen representation prefix with executor proof.
 # 4. Invokes tools/VerifyLifted.lean to verify:
 #    - type(preservation_bridge) ≡ BridgeProp
-#    - type(executor_theorem) ≡ type(frozen_target)
+#    - type(lifted_theorem) ≡ LiftedClaim
 #    - Zero sorryAx and zero custom axioms in both proofs
-#    - Proof-of-method provenance: preservation_bridge ∈ Deps*(executor_theorem)
+#    - Non-circularity: preservation_bridge ∉ Deps(lifted_theorem)
+#    - Method Mode deny-list enforcement
 # 5. Enforces exit code 0 and exact sentinel: VERIFY_LIFTED_SENTINEL_OK.
-# Part of representation-lifting-s1 experimental protocol (v0.5).
+# Part of representation-lifting-s1 experimental protocol (v0.6).
 
 set -euo pipefail
 
-if [ "$#" -lt 4 ]; then
-    echo "Usage: $0 <frozen_target_file> <frozen_stub_prefix_file> <executor_lean_file> <executor_theorem_name>" >&2
+if [ "$#" -lt 3 ]; then
+    echo "Usage: $0 <frozen_target_file> <frozen_stub_prefix_file> <executor_lean_file> [admissibility_json]" >&2
     exit 2
 fi
 
 FROZEN_TARGET_FILE="$1"
 FROZEN_STUB_PREFIX="$2"
 EXECUTOR_LEAN_FILE="$3"
-EXECUTOR_THEOREM="$4"
+ADMISSIBILITY_JSON="${4:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -61,6 +62,19 @@ with open(sys.argv[-1], "w", encoding="utf-8") as out:
 
 python3 -c "$EXTRACT_SCRIPT" "$FROZEN_TARGET_FILE" "$FROZEN_STUB_PREFIX" "$EXECUTOR_LEAN_FILE" "$SCRIPT_DIR/VerifyLifted.lean" "$TMP_DIR/imports.lean"
 
+# Parse prohibited constants from admissibility JSON
+PROHIBITED_LEAN_LIST="[]"
+if [ -n "$ADMISSIBILITY_JSON" ] && [ -f "$ADMISSIBILITY_JSON" ]; then
+    PROHIBITED_LEAN_LIST=$(python3 -c '
+import sys, json
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    data = json.load(f)
+consts = data.get("prohibited_constants", [])
+lean_items = [f"`{c}" for c in consts]
+print("[" + ", ".join(lean_items) + "]")
+' "$ADMISSIBILITY_JSON")
+fi
+
 VERIFY_LEAN="$TMP_DIR/VerifyLiftedHarness.lean"
 
 cat "$TMP_DIR/imports.lean" > "$VERIFY_LEAN"
@@ -74,17 +88,29 @@ echo "" >> "$VERIFY_LEAN"
 echo "-- Frozen Representation Prefix (from Role S)" >> "$VERIFY_LEAN"
 grep -vE '^\s*import\b' "$FROZEN_STUB_PREFIX" >> "$VERIFY_LEAN"
 echo "" >> "$VERIFY_LEAN"
+# Extract candidate-authored declaration names (theorems, lemmas, defs, abbrevs)
+CANDIDATE_DECLS=$(python3 -c '
+import sys, re
+names = []
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    for line in f:
+        m = re.match(r"^\s*(?:theorem|lemma|def|abbrev)\s+([a-zA-Z0-9_]+)", line)
+        if m:
+            names.append(f"`{m.group(1)}")
+print("[" + ", ".join(names) + "]")
+' "$EXECUTOR_LEAN_FILE")
+
 echo "-- Executor Declarations (from Role L)" >> "$VERIFY_LEAN"
 grep -vE '^\s*import\b' "$EXECUTOR_LEAN_FILE" >> "$VERIFY_LEAN"
 echo "" >> "$VERIFY_LEAN"
-echo "#eval runVerifyLifted \`frozen_target \`BridgeProp \`preservation_bridge \`$EXECUTOR_THEOREM" >> "$VERIFY_LEAN"
+echo "#eval! runVerifyLifted \`frozen_target \`BridgeProp \`LiftedClaim \`preservation_bridge \`lifted_theorem $CANDIDATE_DECLS $PROHIBITED_LEAN_LIST" >> "$VERIFY_LEAN"
 
 # 4. Execute verification strictly via pinned lake env lean
 OUTPUT="$TMP_DIR/verify_output.txt"
 cd "$PROJECT_ROOT"
 
 if ! lake env lean "$VERIFY_LEAN" > "$OUTPUT" 2>&1; then
-    echo "VERIFICATION_FAILED: Proof does not elaborate, types mismatch, axioms non-standard, or provenance failed:" >&2
+    echo "VERIFICATION_FAILED: Proof does not elaborate, types mismatch, axioms non-standard, or circularity detected:" >&2
     cat "$OUTPUT" >&2
     exit 1
 fi

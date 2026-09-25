@@ -2,8 +2,9 @@ theorem preservation_bridge : BridgeProp := by
   intro m
   rfl
 
-theorem helper_lemma (k : Nat) : k + 0 = k := by
-  exact (preservation_bridge k).mpr rfl
+theorem helper_lemma (k : Nat) : (liftT k).1 + 0 = (liftT k).1 := by
+  rfl
 
-theorem executor_theorem (n : Nat) : n + 0 = n := by
-  exact helper_lemma n
+theorem lifted_theorem : LiftedClaim := by
+  intro m
+  exact helper_lemma m

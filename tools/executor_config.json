@@ -1,5 +1,5 @@
 {
-  "protocol_version": "v0.5",
+  "protocol_version": "v0.6",
   "pinned_models": {
     "claude-sonnet-4-6": {
       "provider": "Anthropic",
@@ -50,6 +50,6 @@
     "max_attempts_per_turn": 3,
     "retryable_http_codes": [408, 429, 500, 502, 503, 504],
     "backoff_seconds": [5, 15],
-    "request_timeout_seconds": 60
+    "request_timeout_seconds": 600
   }
 }

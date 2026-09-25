@@ -1,0 +1,8 @@
+{
+  "mode": "Method",
+  "case": "pell",
+  "description": "Prohibits pre-packaged Pell equation solution generators in Method Mode.",
+  "prohibited_constants": [
+    "Pell.Solution₁"
+  ]
+}

@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """
 tests/test_verify_lifted.py
-Tests tools/verify_lifted.sh on Role L proof-of-method provenance and axiom checks:
-1. Direct usage of preservation_bridge (PASS)
-2. Transitive helper lemma usage of preservation_bridge (PASS)
-3. Cheated direct proof ignoring preservation_bridge (FAIL: LIFT_NOT_USED)
-4. Missing Lake project environment audit (FAIL: ENVIRONMENT_INVALID)
+Tests tools/verify_lifted.sh on Role L structural proof verification:
+1. Direct usage of LiftedClaim and preservation_bridge (PASS)
+2. Transitive helper lemma in lifted proof (PASS)
+3. Circular cheat: lifted_theorem proves itself through preservation_bridge (FAIL: CIRCULAR_LIFT_DEPENDENCY)
+4. Dead bridge direct proof cheat: proves target directly with dummy have _ := preservation_bridge (FAIL: lifted_theorem missing)
+5. Method Mode deny-list enforcement in lifted declarations (FAIL: FORBIDDEN_METHOD_MODE_CONSTANT)
 """
 
 import sys
 import os
 import subprocess
 import tempfile
+import json
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 TOOLS_DIR = os.path.join(ROOT_DIR, "tools")
@@ -26,28 +28,63 @@ def test_verify_lifted():
 
     # 1. Direct lift proof
     direct = os.path.join(LIFTED_DIR, "direct_lift_proof.lean")
-    res1 = subprocess.run([VERIFY_LIFTED_SCRIPT, target, stub, direct, "executor_theorem"],
+    res1 = subprocess.run([VERIFY_LIFTED_SCRIPT, target, stub, direct],
                           capture_output=True, text=True)
     assert res1.returncode == 0, f"Expected PASS for direct lift proof:\nSTDOUT: {res1.stdout}\nSTDERR: {res1.stderr}"
     assert "VERIFY_LIFTED_SENTINEL_OK" in res1.stdout
-    print("test_verify_lifted (direct bridge usage): PASS")
+    print("test_verify_lifted (direct bridge + lifted_theorem): PASS")
 
     # 2. Transitive helper lift proof
     helper = os.path.join(LIFTED_DIR, "helper_lift_proof.lean")
-    res2 = subprocess.run([VERIFY_LIFTED_SCRIPT, target, stub, helper, "executor_theorem"],
+    res2 = subprocess.run([VERIFY_LIFTED_SCRIPT, target, stub, helper],
                           capture_output=True, text=True)
     assert res2.returncode == 0, f"Expected PASS for helper lift proof:\nSTDOUT: {res2.stdout}\nSTDERR: {res2.stderr}"
     assert "VERIFY_LIFTED_SENTINEL_OK" in res2.stdout
-    print("test_verify_lifted (transitive helper bridge usage): PASS")
+    print("test_verify_lifted (transitive helper in lifted domain): PASS")
 
-    # 3. Cheated direct proof (ignores bridge)
+    # 3. Circular cheat (lifted_theorem uses preservation_bridge)
     cheated = os.path.join(LIFTED_DIR, "cheated_direct_proof.lean")
-    res3 = subprocess.run([VERIFY_LIFTED_SCRIPT, target, stub, cheated, "executor_theorem"],
+    res3 = subprocess.run([VERIFY_LIFTED_SCRIPT, target, stub, cheated],
                           capture_output=True, text=True)
-    assert res3.returncode != 0, f"Expected FAIL for cheated direct proof, got returncode 0"
-    assert "LIFT_NOT_USED" in res3.stderr or "LIFT_NOT_USED" in res3.stdout
-    print("test_verify_lifted (rejection of unlinked proof with LIFT_NOT_USED): PASS")
+    assert res3.returncode != 0, f"Expected FAIL for circular cheat, got returncode 0"
+    assert "CIRCULAR_LIFT_DEPENDENCY" in res3.stderr or "CIRCULAR_LIFT_DEPENDENCY" in res3.stdout
+    print("test_verify_lifted (circularity guard rejects lifted_theorem depending on bridge): PASS")
+
+    # 4. Dead bridge direct proof cheat (only proves executor_theorem with dummy have)
+    dead = os.path.join(LIFTED_DIR, "dead_bridge_direct_proof.lean")
+    res4 = subprocess.run([VERIFY_LIFTED_SCRIPT, target, stub, dead],
+                          capture_output=True, text=True)
+    assert res4.returncode != 0, f"Expected FAIL for dead bridge cheat, got returncode 0"
+    assert "lifted_theorem" in res4.stderr or "lifted_theorem" in res4.stdout
+    print("test_verify_lifted (dead bridge bypass rejected due to missing lifted_theorem): PASS")
+
+    # 5. Method Mode deny-list enforcement in lifted candidate
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+        json.dump({"prohibited_constants": ["Nat.add_comm"]}, f)
+        adm_file = f.name
+
+    with tempfile.NamedTemporaryFile("w", suffix=".lean", delete=False) as f:
+        f.write("""theorem preservation_bridge : BridgeProp := by
+  intro m
+  rfl
+
+theorem lifted_theorem : LiftedClaim := by
+  intro m
+  have _ := Nat.add_comm m 0
+  rfl
+""")
+        cand_violator = f.name
+
+    try:
+        res5 = subprocess.run([VERIFY_LIFTED_SCRIPT, target, stub, cand_violator, adm_file],
+                              capture_output=True, text=True)
+        assert res5.returncode != 0, f"Expected FAIL for prohibited constant usage in lifted theorem"
+        assert "FORBIDDEN_METHOD_MODE_CONSTANT" in res5.stderr or "FORBIDDEN_METHOD_MODE_CONSTANT" in res5.stdout
+        print("test_verify_lifted (Method Mode deny-list rejection in lifted proof): PASS")
+    finally:
+        os.remove(adm_file)
+        os.remove(cand_violator)
 
 if __name__ == "__main__":
     test_verify_lifted()
-    print("ALL VERIFY LIFTED PROVENANCE TESTS PASSED.")
+    print("ALL VERIFY LIFTED PROVENANCE & ARCHITECTURE TESTS PASSED.")

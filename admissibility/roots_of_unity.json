@@ -1,0 +1,8 @@
+{
+  "mode": "Method",
+  "case": "roots_of_unity",
+  "description": "Prohibits library geometric series vanishing lemma for roots of unity in Method Mode.",
+  "prohibited_constants": [
+    "IsPrimitiveRoot.geom_sum_eq_zero"
+  ]
+}
