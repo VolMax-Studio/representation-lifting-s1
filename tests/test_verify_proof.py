@@ -80,6 +80,38 @@ def test_verify_proof():
         assert "FORBIDDEN_METHOD_MODE_CONSTANT" in res_ns.stderr or "FORBIDDEN_METHOD_MODE_CONSTANT" in res_ns.stdout
         print("test_verify_proof (adversarial explicit namespace escape Method Mode rejection): PASS")
 
+        # 7. Adversarial _aux name escape (Method Mode Deny-List)
+        aux_esc = os.path.join(ROOT_DIR, "fixtures", "method_mode", "aux_escape_forbidden.lean")
+        res_aux = subprocess.run([VERIFY_SCRIPT, t2_target, aux_esc, "executor_theorem", adm_fib],
+                                 capture_output=True, text=True)
+        assert res_aux.returncode != 0
+        assert "FORBIDDEN_METHOD_MODE_CONSTANT" in res_aux.stderr or "FORBIDDEN_METHOD_MODE_CONSTANT" in res_aux.stdout
+        print("test_verify_proof (adversarial _aux name escape Method Mode rejection): PASS")
+
+        # 8. Adversarial skipKernelTC security escape
+        skip_tc = os.path.join(ROOT_DIR, "fixtures", "security", "skip_kernel_tc.lean")
+        res_tc = subprocess.run([VERIFY_SCRIPT, target_file, skip_tc, "fake_thm"],
+                                capture_output=True, text=True)
+        assert res_tc.returncode != 0
+        assert "FAIL_CLOSED" in res_tc.stderr or "FAIL_CLOSED" in res_tc.stdout
+        print("test_verify_proof (adversarial skipKernelTC fail-closed rejection): PASS")
+
+        # 9. Adversarial run_cmd meta-programming escape
+        meta_cheat = os.path.join(ROOT_DIR, "fixtures", "security", "run_cmd_meta_cheat.lean")
+        res_mc = subprocess.run([VERIFY_SCRIPT, target_file, meta_cheat, "fake_thm"],
+                                capture_output=True, text=True)
+        assert res_mc.returncode != 0
+        assert "FAIL_CLOSED" in res_mc.stderr or "FAIL_CLOSED" in res_mc.stdout
+        print("test_verify_proof (adversarial run_cmd meta cheat fail-closed rejection): PASS")
+
+        # 10. Adversarial run_cmd filesystem write escape
+        fs_write = os.path.join(ROOT_DIR, "fixtures", "security", "run_cmd_fs_write.lean")
+        res_fs = subprocess.run([VERIFY_SCRIPT, target_file, fs_write, "fake_thm"],
+                                capture_output=True, text=True)
+        assert res_fs.returncode != 0
+        assert "FAIL_CLOSED" in res_fs.stderr or "FAIL_CLOSED" in res_fs.stdout
+        print("test_verify_proof (adversarial run_cmd filesystem write fail-closed rejection): PASS")
+
 if __name__ == "__main__":
     test_verify_proof()
     print("ALL VERIFY PROOF TESTS PASSED.")

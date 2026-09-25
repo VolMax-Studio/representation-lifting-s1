@@ -4,7 +4,7 @@ theorem preservation_bridge : BridgeProp := by
 
 end CandidateExecutor
 
-theorem escaped_circular : CandidateExecutor.LiftedClaim := by
+theorem escaped_circular : LiftedClaim := by
   intro m
   have _ := CandidateExecutor.preservation_bridge m
   rfl

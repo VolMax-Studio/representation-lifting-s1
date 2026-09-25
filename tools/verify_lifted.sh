@@ -1,20 +1,29 @@
 #!/usr/bin/env bash
 # tools/verify_lifted.sh
-# Verification harness for Role L (Lifted Proof Executor):
+# Verification harness for Role L (Lifted Proof Executor) in v0.9:
 # 1. Enforces pinned Lake environment (lean-toolchain, lakefile.toml, lake-manifest.json).
-# 2. Scans executor code for escape tokens (sorry, admit, native_decide, axiom) and trust-core intrusion.
-# 3. Combines frozen representation prefix with executor proof.
-# 4. Invokes tools/VerifyLifted.lean to verify:
-#    - Module-provenance candidate declaration enumeration (env.getModuleIdxFor? = none)
-#    - Immune to _root_, namespace exit, private, or Unicode identifier tricks
-#    - type(preservation_bridge) ≡ BridgeProp
-#    - type(lifted_theorem) ≡ LiftedClaim
-#    - Zero sorryAx and zero custom axioms in both proofs
-#    - Transitive Non-circularity across all local declarations: preservation_bridge ∉ Deps*(lifted_theorem)
-#    - Method Mode deny-list enforcement across all candidate declarations
-#    - Actual mechanical synthesis of original executor theorem with kernel axiom audit
-# 5. Enforces exit code 0 and exact sentinel: VERIFY_LIFTED_SENTINEL_OK.
-# Part of representation-lifting-s1 experimental protocol (v0.8).
+# 2. Defense-in-depth static security scan:
+#    Rejects escape tokens (sorry, admit, native_decide, axiom), meta-programming commands
+#    (run_cmd, #eval, initialize, unsafe, elab, macro, syntax), dangerous options (set_option debug.*),
+#    compiler escape hatches (@[implemented_by]), IO manipulations (IO.FS, IO.Process), and trust core spoofing.
+# 3. Process & Filesystem Sandbox:
+#    Scrubs secrets from environment, snapshots repository files, enforces integrity check post-compilation.
+# 4. Independent Module Compilation & Kernel Replay:
+#    - Compiles TrustedTargetModule (contains frozen target statement).
+#    - Replays TrustedTargetModule through kernel with `lake env leanchecker TrustedTargetModule`.
+#    - Compiles FrozenSpecModule (imports TrustedTargetModule, contains frozen representation & BridgeProp).
+#    - Replays FrozenSpecModule through kernel with `lake env leanchecker FrozenSpecModule`.
+#    - Compiles CandidateLModule (imports FrozenSpecModule, contains candidate lifted proof & bridge).
+#    - Replays CandidateLModule through kernel with `lake env leanchecker CandidateLModule`.
+# 5. Host-side Semantic Verifier (tools/VerifyLifted.lean):
+#    - Strictly evaluates candidate declarations via CandidateLModule module index.
+#    - Verifies type(preservation_bridge) ≡ BridgeProp and type(lifted_theorem) ≡ LiftedClaim.
+#    - Strict kernel axiom audit on both declarations.
+#    - Transitive non-circularity audit strictly within CandidateLModule.
+#    - Method Mode Deny-List enforcement across all candidate declarations.
+#    - Mechanical synthesis of target theorem with kernel axiom audit.
+#    - Enforces sentinel: VERIFY_LIFTED_SENTINEL_OK.
+# Part of representation-lifting-s1 experimental protocol (v0.9).
 
 set -euo pipefail
 
@@ -37,43 +46,21 @@ if [ ! -f "$PROJECT_ROOT/lean-toolchain" ] || [ ! -f "$PROJECT_ROOT/lakefile.tom
     exit 2
 fi
 
-# 2. Fail-closed scan for unproved escape hatches and trust core spoofing in executor code
-FORBIDDEN_PATTERN='(^|[^[:alnum:]_`])(sorry|admit)([^[:alnum:]_`]|$)|native_decide|^[[:space:]]*axiom([[:space:]]|$)'
+# 2. Defense-in-depth static security scan
+FORBIDDEN_PATTERN='(^|[^[:alnum:]_`])(sorry|admit)([^[:alnum:]_`]|$)|native_decide|^[[:space:]]*axiom\b|^[[:space:]]*run_cmd\b|^[[:space:]]*#eval\b|^[[:space:]]*initialize\b|^[[:space:]]*unsafe\b|^[[:space:]]*elab\b|^[[:space:]]*macro\b|^[[:space:]]*syntax\b|set_option[[:space:]]+debug\.|@\[implemented_by\b|IO\.FS\b|IO\.Process\b|\bVerifierTrustCore\b'
 if grep -En "$FORBIDDEN_PATTERN" "$EXECUTOR_LEAN_FILE" >/dev/null 2>&1; then
-    echo "FAIL_CLOSED: Forbidden escape token detected in $EXECUTOR_LEAN_FILE" >&2
+    echo "FAIL_CLOSED: Forbidden command/meta-programming/escape token detected in $EXECUTOR_LEAN_FILE" >&2
     exit 1
 fi
 
-if grep -E '\bVerifierTrustCore\b' "$EXECUTOR_LEAN_FILE" >/dev/null 2>&1; then
-    echo "FAIL_CLOSED: Forbidden attempt to access or modify VerifierTrustCore in $EXECUTOR_LEAN_FILE" >&2
-    exit 1
-fi
-
-TMP_DIR="$(mktemp -d)"
+TMP_DIR="$(pwd)/.lake_candidate_build_$$"
+mkdir -p "$TMP_DIR"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-# 3. Extract and hoist all imports to the absolute top
-EXTRACT_SCRIPT='
-import sys, re
-imports = ["import Lean"]
-for p in sys.argv[1:-1]:
-    if p and p != "":
-        with open(p, "r", encoding="utf-8") as f:
-            for line in f:
-                if re.match(r"^\s*import\b", line):
-                    imp = line.strip()
-                    if imp not in imports:
-                        imports.append(imp)
-with open(sys.argv[-1], "w", encoding="utf-8") as out:
-    for imp in imports:
-        out.write(imp + "\n")
-'
+# 3. Snapshot repository state for filesystem mutation detection
+REPO_SNAPSHOT_BEFORE="$(find tools fixtures calibration admissibility -type f -exec sha256sum {} + | sort)"
 
-VERIFY_LEAN="$TMP_DIR/VerifyLiftedHarness.lean"
-
-python3 -c "$EXTRACT_SCRIPT" "$FROZEN_TARGET_FILE" "$FROZEN_STUB_PREFIX" "$EXECUTOR_LEAN_FILE" "$SCRIPT_DIR/VerifyLifted.lean" "$TMP_DIR/imports.lean"
-
-# Parse prohibited constants from admissibility JSON
+# 4. Parse prohibited constants from admissibility JSON
 PROHIBITED_LEAN_LIST="[]"
 if [ -n "$ADMISSIBILITY_JSON" ] && [ -f "$ADMISSIBILITY_JSON" ]; then
     PROHIBITED_LEAN_LIST=$(python3 -c '
@@ -86,38 +73,119 @@ print("[" + ", ".join(lean_items) + "]")
 ' "$ADMISSIBILITY_JSON")
 fi
 
-cat "$TMP_DIR/imports.lean" > "$VERIFY_LEAN"
-echo "" >> "$VERIFY_LEAN"
-echo "-- Core VerifyLifted definitions" >> "$VERIFY_LEAN"
-grep -vE '^\s*import\b' "$SCRIPT_DIR/VerifyLifted.lean" >> "$VERIFY_LEAN"
-echo "" >> "$VERIFY_LEAN"
-echo "-- Target statement" >> "$VERIFY_LEAN"
-grep -vE '^\s*import\b' "$FROZEN_TARGET_FILE" >> "$VERIFY_LEAN"
-echo "" >> "$VERIFY_LEAN"
-echo "-- Frozen Representation Prefix (from Role S) in candidate namespace" >> "$VERIFY_LEAN"
-echo "namespace CandidateExecutor" >> "$VERIFY_LEAN"
-grep -vE '^\s*import\b' "$FROZEN_STUB_PREFIX" >> "$VERIFY_LEAN"
-echo "end CandidateExecutor" >> "$VERIFY_LEAN"
-echo "" >> "$VERIFY_LEAN"
-echo "-- Executor Declarations (from Role L) in candidate namespace" >> "$VERIFY_LEAN"
-echo "namespace CandidateExecutor" >> "$VERIFY_LEAN"
-grep -vE '^\s*import\b' "$EXECUTOR_LEAN_FILE" >> "$VERIFY_LEAN"
-echo "end CandidateExecutor" >> "$VERIFY_LEAN"
-echo "" >> "$VERIFY_LEAN"
-echo "#eval! VerifierTrustCore.runVerifyLifted \`frozen_target \`BridgeProp \`LiftedClaim \`preservation_bridge \`lifted_theorem $PROHIBITED_LEAN_LIST" >> "$VERIFY_LEAN"
+# Helper to extract imports
+EXTRACT_IMPORTS='
+import sys, re
+paths = sys.argv[1:]
+imports = []
+for p in paths:
+    if p and p != "":
+        with open(p, "r", encoding="utf-8") as f:
+            for line in f:
+                if re.match(r"^\s*import\b", line):
+                    imp = line.strip()
+                    if imp not in imports:
+                        imports.append(imp)
+for imp in imports:
+    print(imp)
+'
 
-# 4. Execute verification strictly via pinned lake env lean
+# Step A: Build TrustedTargetModule
+TARGET_IMPORTS=$(python3 -c "$EXTRACT_IMPORTS" "$FROZEN_TARGET_FILE")
+{
+    echo "$TARGET_IMPORTS"
+    echo ""
+    grep -vE '^\s*import\b' "$FROZEN_TARGET_FILE"
+} > "$TMP_DIR/TrustedTargetModule.lean"
+
+LP="$(lake env printenv LEAN_PATH)"
+export LEAN_PATH="$TMP_DIR:$LP"
+
+if ! lake env lean -o "$TMP_DIR/TrustedTargetModule.olean" "$TMP_DIR/TrustedTargetModule.lean" > "$TMP_DIR/target_comp.log" 2>&1; then
+    echo "TARGET_COMPILATION_FAILED:" >&2
+    cat "$TMP_DIR/target_comp.log" >&2
+    exit 1
+fi
+lake env leanchecker TrustedTargetModule >/dev/null 2>&1 || {
+    echo "TARGET_KERNEL_REPLAY_FAILED: Trusted target failed leanchecker." >&2
+    exit 1
+}
+
+# Step B: Build FrozenSpecModule
+SPEC_IMPORTS=$(python3 -c "$EXTRACT_IMPORTS" "$FROZEN_STUB_PREFIX")
+{
+    echo "import TrustedTargetModule"
+    echo "$SPEC_IMPORTS"
+    echo ""
+    grep -vE '^\s*import\b' "$FROZEN_STUB_PREFIX"
+} > "$TMP_DIR/FrozenSpecModule.lean"
+
+if ! lake env lean -o "$TMP_DIR/FrozenSpecModule.olean" "$TMP_DIR/FrozenSpecModule.lean" > "$TMP_DIR/spec_comp.log" 2>&1; then
+    echo "SPEC_COMPILATION_FAILED:" >&2
+    cat "$TMP_DIR/spec_comp.log" >&2
+    exit 1
+fi
+lake env leanchecker FrozenSpecModule >/dev/null 2>&1 || {
+    echo "SPEC_KERNEL_REPLAY_FAILED: Frozen spec failed leanchecker." >&2
+    exit 1
+}
+
+# Step C: Build CandidateLModule
+CAND_IMPORTS=$(python3 -c "$EXTRACT_IMPORTS" "$EXECUTOR_LEAN_FILE")
+{
+    echo "import FrozenSpecModule"
+    echo "$CAND_IMPORTS"
+    echo ""
+    echo "namespace CandidateExecutor"
+    grep -vE '^\s*import\b' "$EXECUTOR_LEAN_FILE"
+    echo "end CandidateExecutor"
+} > "$TMP_DIR/CandidateLModule.lean"
+
+# Scrub secrets and execute candidate compilation
+env -u OPENAI_API_KEY -u ANTHROPIC_API_KEY -u GEMINI_API_KEY -u GITHUB_TOKEN -u SSH_AUTH_SOCK \
+    lake env lean -o "$TMP_DIR/CandidateLModule.olean" "$TMP_DIR/CandidateLModule.lean" > "$TMP_DIR/cand_comp.log" 2>&1 || {
+    echo "VERIFY_LIFTED_FAILED: Candidate code failed to elaborate:" >&2
+    cat "$TMP_DIR/cand_comp.log" >&2
+    exit 1
+}
+
+# Filesystem mutation integrity guard
+REPO_SNAPSHOT_AFTER="$(find tools fixtures calibration admissibility -type f -exec sha256sum {} + | sort)"
+if [ "$REPO_SNAPSHOT_BEFORE" != "$REPO_SNAPSHOT_AFTER" ]; then
+    echo "FAIL_CLOSED: Unauthorized filesystem mutation detected during candidate compilation." >&2
+    exit 1
+fi
+
+# Kernel replay on candidate module via leanchecker
+if ! lake env leanchecker CandidateLModule > "$TMP_DIR/leanchecker.log" 2>&1; then
+    echo "FAIL_CLOSED: Candidate module failed kernel replay via leanchecker:" >&2
+    cat "$TMP_DIR/leanchecker.log" >&2
+    exit 1
+fi
+
+# Step D: Execute Host-side Semantic Verifier
+VERIFY_LEAN="$TMP_DIR/VerifierLModule.lean"
+{
+    echo "import Lean"
+    echo "import FrozenSpecModule"
+    echo "import CandidateLModule"
+    echo ""
+    grep -vE '^\s*import\b' "$SCRIPT_DIR/VerifyLifted.lean"
+    echo ""
+    echo "#eval! VerifierTrustCore.runVerifyLifted \`CandidateLModule \`FrozenSpecModule \`frozen_target $PROHIBITED_LEAN_LIST"
+} > "$VERIFY_LEAN"
+
 OUTPUT="$TMP_DIR/verify_output.txt"
 cd "$PROJECT_ROOT"
 
 if ! lake env lean "$VERIFY_LEAN" > "$OUTPUT" 2>&1; then
-    echo "VERIFICATION_FAILED: Proof does not elaborate, types mismatch, axioms non-standard, or circularity detected:" >&2
+    echo "VERIFY_LIFTED_FAILED: Type mismatch, circularity, non-standard axiom, or prohibited constants used:" >&2
     cat "$OUTPUT" >&2
     exit 1
 fi
 
 if ! grep -q "VERIFY_LIFTED_SENTINEL_OK" "$OUTPUT"; then
-    echo "VERIFICATION_FAILED: Sentinel VERIFY_LIFTED_SENTINEL_OK missing from output:" >&2
+    echo "VERIFY_LIFTED_FAILED: Sentinel VERIFY_LIFTED_SENTINEL_OK missing from output:" >&2
     cat "$OUTPUT" >&2
     exit 1
 fi

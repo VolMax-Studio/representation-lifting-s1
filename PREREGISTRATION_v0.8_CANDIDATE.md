@@ -1,5 +1,5 @@
 # representation-lifting-s1: PREREGISTRATION v0.8 CANDIDATE
-**Status:** READY FOR CLAUDE GATE / HUMAN RATIFICATION (SUPERSEDES v0.1 `254e06d8…`, v0.2 `4fdc0bf4…`, v0.3 `da532b0e…`, v0.4 `bdc5c76e…`, v0.5 `64e6cde8…`, v0.6 `ecb31e42…`, AND v0.7 `4f12eae5…`)  
+**Status:** SUPERSEDED BY v0.9 (`PREREGISTRATION_v0.9_CANDIDATE.md`)  
 **Author / Principal Investigator:** Ivan Nestorov  
 **Target Toolchain:** Lean 4 (v4.34.0) / Mathlib v4.34.0 (commit `5ed2965256430c3649e86755f9576b54eca72435`)  
 **Repository Location:** `PORTFOLIO/representation-lifting-s1/`  

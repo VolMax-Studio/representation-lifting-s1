@@ -3,32 +3,25 @@ import Lean
 /-!
 tools/CheckBridge.lean
 Pure Lean 4 meta-checker for Representation Search (Role S) Verification:
-1. Module Provenance-Based Candidate Declaration Enumeration:
-   Inspects environment for all declarations authored in the current execution module
-   (env.getModuleIdxFor? name = none), excluding trusted verifier and target definitions.
-   Captures all declarations regardless of namespace, `_root_`, `end` escapes, private, or Unicode names.
-2. Verifies that `LiftDom`, `LiftCod`, `liftT`, `LiftedClaim`, and `BridgeProp` are declared.
-3. Representation Axiom Audit (zero sorryAx, zero custom axioms):
-   - ALL declarations authored in candidate scope must depend ONLY on:
-     {propext, Classical.choice, Quot.sound}.
-   - Role S produces a proof-free specification; sorryAx anywhere is strictly forbidden.
+1. Strict Module Provenance:
+   Candidate declarations are identified strictly by module index (`idx(candModName)`).
+   Zero reliance on name prefixes, namespaces, `_root_`, `_aux`, or allowlists.
+2. Method Mode Deny-List Enforcement:
+   Recursively inspects direct constant references in all declarations authored in candidate module.
+3. Pure Representation Axiom Audit across ALL Candidate Declarations (zero sorryAx):
+   ALL candidate declarations must depend ONLY on {propext, Classical.choice, Quot.sound}.
 4. Identity Guard (AND semantics):
-   - Evaluates whether LiftDom = LiftCod AND liftT = id definitionally.
-   - Rejects with IDENTITY_GUARD if both are true.
+   Evaluates whether LiftDom = LiftCod AND liftT = id definitionally.
+   Rejects with IDENTITY_GUARD if both are true.
 5. Sequential Dependent Binder Type Comparison:
-   - Peels binders of BridgeProp.value and frozen_target.type.
-   - Compares binder counts and types sequentially with replaceFVars.
-   - Rejects extraneous or mismatched hypotheses.
+   Peels binders of BridgeProp.value and frozen_target.type.
+   Compares binder counts and types sequentially with replaceFVars.
 6. Structural Target and LiftedClaim Linkage:
-   - Asserts conclusion of BridgeProp is an equivalence (↔).
-   - Rejects syntactically tautological equivalences (P ↔ P).
-   - Asserts one side matches target conclusion under the peeled telescope.
-   - Asserts the other side matches LiftedClaim conclusion under the peeled telescope.
-   - Asserts the lifted side contains constant `liftT`.
-7. Method Mode Deny-List Enforcement:
-   - Inspects direct constants in all candidate declarations against prohibited constants (exact and prefix).
-8. Prints strict sentinel: `CHECK_BRIDGE_SENTINEL_OK`.
-Part of representation-lifting-s1 experimental protocol (v0.8).
+   Asserts conclusion of BridgeProp is an equivalence (↔).
+   Rejects syntactically tautological equivalences (P ↔ P).
+   Asserts one side matches target conclusion, other side matches LiftedClaim and contains liftT.
+7. Sentinel: `CHECK_BRIDGE_SENTINEL_OK`.
+Part of representation-lifting-s1 experimental protocol (v0.9).
 -/
 
 namespace VerifierTrustCore
@@ -46,32 +39,6 @@ def getDeclValue? (decl : ConstantInfo) : Option Expr :=
   | .defnInfo v => some v.value
   | _ => none
 
-def isTrusted (trustedNames : List Name) (n : Name) : Bool :=
-  (`VerifierTrustCore).isPrefixOf n ||
-  trustedNames.contains n ||
-  (`_eval).isPrefixOf n ||
-  (`_unsafe_rec).isPrefixOf n ||
-  n == `_eval ||
-  match n with
-  | .str _ s => s.startsWith "_aux" || s.startsWith "_eval"
-  | _ => false
-
-def getCandidateDecls (env : Environment) (trustedNames : List Name) : List Name :=
-  env.constants.fold (fun acc name _ =>
-    if env.getModuleIdxFor? name == none && !isTrusted trustedNames name then
-      name :: acc
-    else
-      acc
-  ) []
-
-def resolveCandidateName (env : Environment) (shortName : Name) : MetaM Name := do
-  if env.contains shortName then
-    return shortName
-  let inNs := `CandidateExecutor ++ shortName
-  if env.contains inNs then
-    return inNs
-  throwError s!"Declaration '{shortName}' (or '{inNs}') not found in environment."
-
 def isProhibited (c : Name) (prohibited : List Name) : Bool :=
   prohibited.any fun p => p == c || p.isPrefixOf c
 
@@ -85,46 +52,56 @@ def checkDirectProhibited (env : Environment) (declNames : List Name) (prohibite
           if isProhibited c prohibited then
             throwError s!"FORBIDDEN_METHOD_MODE_CONSTANT: Declaration '{d}' directly references prohibited constant '{c}'."
 
-def runCheckBridge (targetName bridgePropName liftedClaimName liftTName domName codName : Name) (prohibited : List Name) : MetaM Unit := do
+def resolveInModule (env : Environment) (modIdx : ModuleIdx) (targetShortName : String) : MetaM Name := do
+  let consts := env.header.moduleData[modIdx.toNat]!.constants
+  for c in consts do
+    if match c.name with | .str _ s => s == targetShortName | _ => false then
+      return c.name
+  throwError s!"Declaration '{targetShortName}' not found in candidate module."
+
+def runCheckBridge (candModName frozenTargetName : Name) (prohibited : List Name) : MetaM Unit := do
   let env ← getEnv
   
-  -- 1. Structural declaration check & Name resolution
-  let some targetDecl := env.find? targetName 
-    | throwError s!"Target declaration '{targetName}' not found."
-  let bPropResolved ← resolveCandidateName env bridgePropName
-  let lClaimResolved ← resolveCandidateName env liftedClaimName
-  let liftTResolved ← resolveCandidateName env liftTName
-  let domResolved ← resolveCandidateName env domName
-  let codResolved ← resolveCandidateName env codName
+  -- 1. Locate Candidate Module
+  let some candIdx := env.getModuleIdx? candModName
+    | throwError s!"Candidate module '{candModName}' not found in environment."
+  
+  let candidateConsts := env.header.moduleData[candIdx.toNat]!.constants
+  let candidateDecls := candidateConsts.map (·.name) |>.toList
+  
+  -- 2. Method Mode Deny-List Audit across ALL candidate declarations
+  checkDirectProhibited env candidateDecls prohibited
+
+  -- 3. Resolve Structural Declarations inside Candidate Module
+  let some targetDecl := env.find? frozenTargetName 
+    | throwError s!"Target declaration '{frozenTargetName}' not found in environment."
+  
+  let bPropResolved ← resolveInModule env candIdx "BridgeProp"
+  let lClaimResolved ← resolveInModule env candIdx "LiftedClaim"
+  let liftTResolved ← resolveInModule env candIdx "liftT"
+  let domResolved ← resolveInModule env candIdx "LiftDom"
+  let codResolved ← resolveInModule env candIdx "LiftCod"
 
   let some (.defnInfo bridgePropVal) := env.find? bPropResolved 
-    | throwError s!"Bridge property definition '{bPropResolved}' not found or not a definition."
+    | throwError s!"Declaration '{bPropResolved}' is not a definition."
   let some (.defnInfo liftedClaimVal) := env.find? lClaimResolved 
-    | throwError s!"Lifted claim definition '{lClaimResolved}' not found or not a definition."
+    | throwError s!"Declaration '{lClaimResolved}' is not a definition."
   let some liftTDecl := env.find? liftTResolved 
-    | throwError s!"Representation map '{liftTResolved}' not found."
+    | throwError s!"Declaration '{liftTResolved}' not found."
   let some _ := env.find? domResolved 
-    | throwError s!"Domain '{domResolved}' not found."
+    | throwError s!"Declaration '{domResolved}' not found."
   let some _ := env.find? codResolved 
-    | throwError s!"Codomain '{codResolved}' not found."
+    | throwError s!"Declaration '{codResolved}' not found."
 
-  -- 2. Module Provenance Candidate Enumeration
-  let trustedList : List Name := [targetName, `VerifierTrustCore.runCheckBridge]
-  let candidateDecls := getCandidateDecls env trustedList
-  let allDecls := if candidateDecls.contains bPropResolved then candidateDecls else [domResolved, codResolved, liftTResolved, bPropResolved, lClaimResolved] ++ candidateDecls
-
-  -- Method Mode Deny-List Enforcement (all candidate declarations in environment)
-  checkDirectProhibited env allDecls prohibited
-
-  -- 3. Representation Axiom Audit across ALL candidate declarations (fail-closed, zero sorryAx, zero custom axioms)
-  let allowedRepAxioms : List Name := [`propext, `Classical.choice, `Quot.sound]
-  for cName in allDecls do
-    let axioms ← Lean.collectAxioms cName
+  -- 4. Pure Representation Axiom Audit across ALL Candidate Declarations (zero sorryAx)
+  let allowedAxioms : List Name := [`propext, `Classical.choice, `Quot.sound]
+  for d in candidateDecls do
+    let axioms ← Lean.collectAxioms d
     for ax in axioms do
-      if !allowedRepAxioms.contains ax then
-        throwError s!"FORBIDDEN_REPRESENTATION_AXIOM: Declaration '{cName}' transitively depends on axiom '{ax}'."
+      if !allowedAxioms.contains ax then
+        throwError s!"FORBIDDEN_AXIOM: Specification declaration '{d}' relies on non-standard axiom '{ax}'."
 
-  -- 4. Identity Guard (AND semantics: LiftDom = LiftCod AND liftT = id)
+  -- 5. Identity Guard (AND Semantics: LiftDom = LiftCod AND liftT = id)
   let domEqCod ← isDefEq (mkConst domResolved) (mkConst codResolved)
   if domEqCod then
     let idFn ← mkAppOptM ``id #[some (mkConst domResolved)]
@@ -132,7 +109,7 @@ def runCheckBridge (targetName bridgePropName liftedClaimName liftTName domName 
     if isId then
       throwError "IDENTITY_GUARD: Representation map is definitionally the identity function on identical domains."
 
-  -- 5. Target Linkage & Sequential Dependent Binder Comparison
+  -- 6. Target Linkage & Sequential Dependent Binder Comparison
   forallTelescope targetDecl.type fun targetVars targetConcl => do
     forallTelescope bridgePropVal.value fun bridgeVars bridgeConcl => do
       -- Check binder count
