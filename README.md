@@ -4,7 +4,7 @@
 **Author / Principal Investigator:** Ivan Nestorov  
 **Repository:** [https://github.com/VolMax-Studio/representation-lifting-s1](https://github.com/VolMax-Studio/representation-lifting-s1)  
 **Toolchain Target:** Lean 4 (v4.34.0) / Mathlib v4.34.0 (commit `5ed2965256430c3649e86755f9576b54eca72435`)  
-**Preregistration Specification:** [PREREGISTRATION_v0.18_CANDIDATE.md](file:///home/volmax-studio/volmax-projects/iot2/PORTFOLIO/representation-lifting-s1/PREREGISTRATION_v0.18_CANDIDATE.md)  
+**Preregistration Specification:** [PREREGISTRATION_v0.19_CANDIDATE.md](file:///home/volmax-studio/volmax-projects/iot2/PORTFOLIO/representation-lifting-s1/PREREGISTRATION_v0.19_CANDIDATE.md)  
 **Status:** `ARCHITECTURE + ANALYSIS + SELECTION CUSTODY + EXTERNAL ROOT-OF-TRUST FROZEN / READY FOR PRE-RANDOMNESS GATES`
 
 ---
@@ -122,7 +122,11 @@ python3 tests/test_analyze.py           # Verifies deterministic analysis custod
     - `pool_anchor_receipt.json` anchors pool existence prior to beacon round via public append-only transparency log (Rekor / RFC 3161 / OpenTimestamps). Missing receipt $\implies$ `NOT_EVALUABLE_POOL_TIMESTAMP`.
     - `beacon_verification_receipt.json` anchors BLS threshold signature authenticity against quicknet's public key (`83cf0f28…`) via official drand-client verification. Missing receipt $\implies$ `NOT_EVALUABLE_BEACON_AUTHENTICITY`.
 16. **Archived drand External Root-of-Trust & Full Manifest Coverage:**
-    - `external_roots/drand_quicknet_info.json` pins the official `/info` response (SHA-256 `7054e0f425907deee8f5a0dfc112c5a1a040914fa1ebb139285b57cdd9d6ead3`), locking chain hash, genesis, period, and 96-byte G2 public key.
     - `tools/analyze.py` strictly validates `public_key_hex` and its 96-byte length against the pinned constant.
     - Packaging enforces mechanical set equality $\operatorname{set}(\text{manifest}) \equiv \operatorname{set}(\text{packaged})$, guaranteeing 100% cryptographic coverage of all repository files.
+17. **Byte-for-Byte Archived Root-of-Trust, Cross-Relay Verified (v0.19):**
+    - The hand-formatted `external_roots/drand_quicknet_info.json` (v0.18) is removed. It was reconstructed, not fetched, and one field (`groupHash`) was transcribed incorrectly — a provenance defect caught precisely because that field is otherwise unused by the analyzer.
+    - Replaced with the unmodified raw `/info` response bodies from two independent relays: `external_roots/drand_quicknet_info_api.raw.json` (`api.drand.sh`, SHA-256 `3e690bc527c8a4e78232bc06b5a3cff057c51c68f51b208a1a21b2abd6d6b194`) and `external_roots/drand_quicknet_info_cloudflare.raw.json` (`drand.cloudflare.com`, SHA-256 `1ae9f5818c8a16dc22001413a79f0f08fa655f9d4790d659cb3f60e94577bad7`), each with a paired `.http_status.txt`, `.headers.txt`, `.fetched_at_utc.txt`, and `.meta.json` provenance record.
+    - `tests/test_analyze.py` and `tests/test_drand_schedule.py` verify: raw SHA-256 of each archived response, HTTP status `200`, canonical-JSON semantic equality between the two relays, and all six quicknet constants (`hash`, `groupHash`, `period`, `genesis_time`, `schemeID`, `public_key`) against both independently.
+    - `QUICKNET_GROUP_HASH` (`f477d5c8…331c5d3e`) is now a pinned constant in `tools/drand_schedule.py`, verified in tests even though it is not consumed by selection logic.
 

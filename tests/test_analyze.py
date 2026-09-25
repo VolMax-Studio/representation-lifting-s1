@@ -1114,28 +1114,46 @@ class TestAnalyzeCustody(unittest.TestCase):
             )
         self.assertIn("Quicknet public key length violation", str(ctx.exception))
 
+    RAW_ROOT_SHA256 = {
+        "api": "3e690bc527c8a4e78232bc06b5a3cff057c51c68f51b208a1a21b2abd6d6b194",
+        "cloudflare": "1ae9f5818c8a16dc22001413a79f0f08fa655f9d4790d659cb3f60e94577bad7",
+    }
+
+    def _load_raw_root(self, relay):
+        raw_path = os.path.join(PROJECT_ROOT, "external_roots", f"drand_quicknet_info_{relay}.raw.json")
+        self.assertTrue(os.path.exists(raw_path), f"external_roots/drand_quicknet_info_{relay}.raw.json must exist")
+        with open(raw_path, "rb") as f:
+            content = f.read()
+        file_hash = hashlib.sha256(content).hexdigest()
+        self.assertEqual(file_hash, self.RAW_ROOT_SHA256[relay], f"{relay} raw archive SHA-256 mismatch")
+
+        status_path = os.path.join(PROJECT_ROOT, "external_roots", f"drand_quicknet_info_{relay}.http_status.txt")
+        with open(status_path) as f:
+            self.assertEqual(f.read().strip(), "200", f"{relay} archived HTTP status was not 200")
+
+        return json.loads(content.decode("utf-8"))
+
     def test_drand_quicknet_constants_against_archived_root(self):
         """
-        Verifies that all 5 drand quicknet constants in analyze.py and drand_schedule.py
-        match the archived external root from the official /info endpoint.
+        Verifies that all 6 drand quicknet constants in analyze.py and drand_schedule.py
+        match two independently archived roots from the official /info endpoint
+        (api.drand.sh and drand.cloudflare.com), and that the two roots agree.
         """
-        root_path = os.path.join(PROJECT_ROOT, "external_roots", "drand_quicknet_info.json")
-        self.assertTrue(os.path.exists(root_path), "external_roots/drand_quicknet_info.json must exist")
-        
-        with open(root_path, "rb") as f:
-            content = f.read()
-        
-        # Verify SHA-256 of archived file
-        file_hash = hashlib.sha256(content).hexdigest()
-        self.assertEqual(file_hash, "7054e0f425907deee8f5a0dfc112c5a1a040914fa1ebb139285b57cdd9d6ead3")
+        api_data = self._load_raw_root("api")
+        cf_data = self._load_raw_root("cloudflare")
 
-        data = json.loads(content.decode("utf-8"))
-        self.assertEqual(data["hash"], analyze.QUICKNET_CHAIN_HASH)
-        self.assertEqual(data["period"], 3)
-        self.assertEqual(data["genesis_time"], 1692803367)
-        self.assertEqual(data["schemeID"], analyze.DRAND_QUICKNET_SCHEME_ID)
-        self.assertEqual(data["public_key"], analyze.DRAND_QUICKNET_PUBLIC_KEY_HEX)
-        self.assertEqual(len(bytes.fromhex(data["public_key"])), 96)
+        # Semantic equality of both relays' responses, independent of raw byte layout.
+        self.assertEqual(json.dumps(api_data, sort_keys=True), json.dumps(cf_data, sort_keys=True),
+                          "api.drand.sh and drand.cloudflare.com archived /info responses are not semantically equal")
+
+        for data in (api_data, cf_data):
+            self.assertEqual(data["hash"], analyze.QUICKNET_CHAIN_HASH)
+            self.assertEqual(data["groupHash"], analyze.QUICKNET_GROUP_HASH)
+            self.assertEqual(data["period"], 3)
+            self.assertEqual(data["genesis_time"], 1692803367)
+            self.assertEqual(data["schemeID"], analyze.DRAND_QUICKNET_SCHEME_ID)
+            self.assertEqual(data["public_key"], analyze.DRAND_QUICKNET_PUBLIC_KEY_HEX)
+            self.assertEqual(len(bytes.fromhex(data["public_key"])), 96)
 
 if __name__ == "__main__":
     unittest.main()

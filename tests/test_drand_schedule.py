@@ -82,20 +82,41 @@ def test_invariant_grid():
         assert t_prev <= u < t_curr, f"Failed at dt={dt}: not ({t_prev} <= {u} < {t_curr})"
     print("test_invariant_grid: PASS (1000 points checked)")
 
-def test_quicknet_constants():
+RAW_ROOT_SHA256 = {
+    "api": "3e690bc527c8a4e78232bc06b5a3cff057c51c68f51b208a1a21b2abd6d6b194",
+    "cloudflare": "1ae9f5818c8a16dc22001413a79f0f08fa655f9d4790d659cb3f60e94577bad7",
+}
+
+def _load_raw_root(relay):
     import json
     import hashlib
-    root_path = os.path.join(ROOT_DIR, "external_roots", "drand_quicknet_info.json")
-    with open(root_path, "rb") as f:
+    raw_path = os.path.join(ROOT_DIR, "external_roots", f"drand_quicknet_info_{relay}.raw.json")
+    with open(raw_path, "rb") as f:
         content = f.read()
-    assert hashlib.sha256(content).hexdigest() == "7054e0f425907deee8f5a0dfc112c5a1a040914fa1ebb139285b57cdd9d6ead3"
-    info = json.loads(content.decode("utf-8"))
-    
-    from tools.drand_schedule import QUICKNET_CHAIN_HASH, GENESIS_TIME, PERIOD_SECONDS
-    assert QUICKNET_CHAIN_HASH == info["hash"]
-    assert GENESIS_TIME == info["genesis_time"]
-    assert PERIOD_SECONDS == info["period"]
-    print("test_quicknet_constants: PASS (verified against archived /info root)")
+    assert hashlib.sha256(content).hexdigest() == RAW_ROOT_SHA256[relay], \
+        f"{relay} raw archive SHA-256 mismatch"
+    status_path = os.path.join(ROOT_DIR, "external_roots", f"drand_quicknet_info_{relay}.http_status.txt")
+    with open(status_path) as f:
+        assert f.read().strip() == "200", f"{relay} archived HTTP status was not 200"
+    return content, json.loads(content.decode("utf-8"))
+
+def test_quicknet_constants():
+    from tools.drand_schedule import (
+        QUICKNET_CHAIN_HASH, QUICKNET_GROUP_HASH, GENESIS_TIME, PERIOD_SECONDS,
+    )
+    _api_content, api_info = _load_raw_root("api")
+    _cf_content, cf_info = _load_raw_root("cloudflare")
+
+    import json
+    assert json.dumps(api_info, sort_keys=True) == json.dumps(cf_info, sort_keys=True), \
+        "api.drand.sh and drand.cloudflare.com archived /info responses are not semantically equal"
+
+    for info in (api_info, cf_info):
+        assert QUICKNET_CHAIN_HASH == info["hash"]
+        assert QUICKNET_GROUP_HASH == info["groupHash"]
+        assert GENESIS_TIME == info["genesis_time"]
+        assert PERIOD_SECONDS == info["period"]
+    print("test_quicknet_constants: PASS (verified against two independently archived /info roots)")
 
 if __name__ == "__main__":
     test_synthetic_parameters()

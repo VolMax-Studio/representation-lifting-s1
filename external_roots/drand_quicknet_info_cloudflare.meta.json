@@ -1,0 +1,9 @@
+{
+  "url": "https://drand.cloudflare.com/52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971/info",
+  "relay": "drand.cloudflare.com",
+  "fetched_at_utc": "2026-09-25T21:46:57Z",
+  "http_status": 200,
+  "raw_file": "drand_quicknet_info_cloudflare.raw.json",
+  "raw_sha256": "1ae9f5818c8a16dc22001413a79f0f08fa655f9d4790d659cb3f60e94577bad7",
+  "headers_file": "drand_quicknet_info_cloudflare.headers.txt"
+}

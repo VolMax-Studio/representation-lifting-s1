@@ -1,0 +1,9 @@
+{
+  "url": "https://api.drand.sh/52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971/info",
+  "relay": "api.drand.sh",
+  "fetched_at_utc": "2026-09-25T21:46:46Z",
+  "http_status": 200,
+  "raw_file": "drand_quicknet_info_api.raw.json",
+  "raw_sha256": "3e690bc527c8a4e78232bc06b5a3cff057c51c68f51b208a1a21b2abd6d6b194",
+  "headers_file": "drand_quicknet_info_api.headers.txt"
+}

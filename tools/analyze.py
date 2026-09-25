@@ -52,10 +52,10 @@ from typing import Any
 
 try:
     from select_indices import select_indices
-    from drand_schedule import compute_scheduled_round, QUICKNET_CHAIN_HASH
+    from drand_schedule import compute_scheduled_round, QUICKNET_CHAIN_HASH, QUICKNET_GROUP_HASH
 except ImportError:
     from tools.select_indices import select_indices
-    from tools.drand_schedule import compute_scheduled_round, QUICKNET_CHAIN_HASH
+    from tools.drand_schedule import compute_scheduled_round, QUICKNET_CHAIN_HASH, QUICKNET_GROUP_HASH
 
 SCHEMA_VERSION = "representation-lifting-execution-receipt/v1"
 CONFIG_SCHEMA_VERSION = "representation-lifting-executor-config/v1"
