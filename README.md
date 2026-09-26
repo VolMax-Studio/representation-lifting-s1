@@ -4,8 +4,8 @@
 **Author / Principal Investigator:** Ivan Nestorov  
 **Repository:** [https://github.com/VolMax-Studio/representation-lifting-s1](https://github.com/VolMax-Studio/representation-lifting-s1)  
 **Toolchain Target:** Lean 4 (v4.34.0) / Mathlib v4.34.0 (commit `5ed2965256430c3649e86755f9576b54eca72435`)  
-**Preregistration Specification:** [PREREGISTRATION_v0.19_CANDIDATE.md](file:///home/volmax-studio/volmax-projects/iot2/PORTFOLIO/representation-lifting-s1/PREREGISTRATION_v0.19_CANDIDATE.md)  
-**Status:** `ARCHITECTURE + ANALYSIS + SELECTION CUSTODY + EXTERNAL ROOT-OF-TRUST FROZEN / READY FOR PRE-RANDOMNESS GATES`
+**Preregistration Specification:** [PREREGISTRATION_v0.20_CANDIDATE.md](file:///home/volmax-studio/volmax-projects/iot2/PORTFOLIO/representation-lifting-s1/PREREGISTRATION_v0.20_CANDIDATE.md)  
+**Status:** `ARCHITECTURE + ANALYSIS + SELECTION CUSTODY + ROOT-OF-TRUST + GATE-1 INPUT CONTRACT FROZEN / READY FOR PRE-RANDOMNESS GATES`
 
 ---
 
@@ -54,6 +54,7 @@ python3 tests/test_verify_lifted.py     # Verifies structural lift, non-circular
 python3 tests/test_executor_harness.py  # Verifies state machine loops, truncation handling, H1 calibration, blind orchestration, and control execution
 python3 tests/test_drand_schedule.py    # Verifies drand quicknet future-round invariants across 1000 grid points and pinned chain hash
 python3 tests/test_analyze.py           # Verifies deterministic analysis custody, completion categories, dual H1 inequalities, control veto, and aggregation
+python3 tests/test_nontriviality_filter.py # Verifies Gate 1 input contract, anchored extraction, and tri-state filter
 ```
 
 ---
@@ -130,4 +131,10 @@ python3 tests/test_analyze.py           # Verifies deterministic analysis custod
     - `QUICKNET_GROUP_HASH` is pinned as a constant in `tools/drand_schedule.py` and exported through `tools/analyze.py`.
     - `tools/analyze.py` strictly validates `public_key_hex` and its 96-byte length against the pinned constant.
     - Packaging enforces mechanical set equality $\operatorname{set}(\text{manifest}) \equiv \operatorname{set}(\text{packaged}) \setminus \{\text{MANIFEST.sha256}\}$, guaranteeing 100% cryptographic coverage of all repository payload files with zero `sha256sum -c` failures.
+17. **Gate-1 Input Contract & Tri-State Nontriviality Adjudicator (v0.20 Amendment):**
+    - Preserves ratified `representation-lifting-s1-freeze-v0.19` baseline tag as historically immutable.
+    - Implemented `tools/extract_proofnet_statement.py`: anchored, fail-closed extraction that strips only trailing proof placeholders (`:= by sorry` / `:= sorry`), eliminates syntax collisions, and hoists imports to the file head.
+    - Upgraded `tools/nontriviality_filter.sh` to a tri-state adjudicator ($0 = \text{NONTRIVIAL}$, $1 = \text{TRIVIAL}$, $2 = \text{INPUT\_ERROR / BASELINE\_INVALID}$) with mandatory fail-closed baseline elaboration check using `sorry`.
+    - Eliminates false-negative parse-failure vulnerability, ensuring syntax errors fail closed as input errors rather than passing as nontrivial.
+    - Verified by `tests/test_nontriviality_filter.py` including a 367/367 entry kill-test on the ProofNet-Verified dataset.
 
