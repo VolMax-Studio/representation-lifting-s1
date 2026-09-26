@@ -155,20 +155,32 @@ jobs:
               return count
 
           # Verify and parse each log file
-          c1 = parse_log("test_check_bridge.log", r"ALL 12 PRESERVATION BRIDGE INTEGRATION TESTS PASSED", r"ALL (\d+) PRESERVATION")
+          c1 = parse_log("test_check_bridge.log", r"ALL 12 BRIDGE FIXTURE REGRESSION TESTS PASSED", r"ALL (\d+) BRIDGE FIXTURE")
           assert c1 == 12, f"Bridge count mismatch: expected 12, got {c1}"
 
-          c2 = parse_log("test_verify_proof.log", r"ALL 12 THEOREM VERIFICATION TESTS PASSED", r"ALL (\d+) THEOREM")
+          # test_verify_proof.log
+          parse_log("test_verify_proof.log", r"ALL VERIFY PROOF TESTS PASSED")
+          with open("test_verify_proof.log", "r", encoding="utf-8") as f:
+              c2 = len(re.findall(r"test_verify_proof \([^)]+\): PASS", f.read()))
           assert c2 == 12, f"Proof count mismatch: expected 12, got {c2}"
 
-          c3 = parse_log("test_verify_lifted.log", r"ALL 11 LIFTED STRUCTURAL TESTS PASSED", r"ALL (\d+) LIFTED")
+          # test_verify_lifted.log
+          parse_log("test_verify_lifted.log", r"ALL VERIFY LIFTED PROVENANCE & ARCHITECTURE TESTS PASSED")
+          with open("test_verify_lifted.log", "r", encoding="utf-8") as f:
+              c3 = len(re.findall(r"test_verify_lifted \([^)]+\): PASS", f.read()))
           assert c3 == 11, f"Lifted count mismatch: expected 11, got {c3}"
 
-          c4 = parse_log("test_executor_harness.log", r"ALL HARNESS STATE MACHINE TESTS PASSED")
-          assert c4 is None
+          # test_executor_harness.log
+          parse_log("test_executor_harness.log", r"ALL HARNESS STATE MACHINE TESTS PASSED")
+          with open("test_executor_harness.log", "r", encoding="utf-8") as f:
+              c4 = len(re.findall(r"test_[a-z0-9_]+: PASS", f.read()))
+          assert c4 == 8, f"Harness count mismatch: expected 8, got {c4}"
 
-          c5 = parse_log("test_drand_schedule.log", r"ALL DRAND SCHEDULE REGRESSION TESTS PASSED")
-          assert c5 is None
+          # test_drand_schedule.log
+          parse_log("test_drand_schedule.log", r"ALL DRAND SCHEDULE REGRESSION TESTS PASSED")
+          with open("test_drand_schedule.log", "r", encoding="utf-8") as f:
+              c5 = len(re.findall(r"test_[a-z0-9_]+: PASS", f.read()))
+          assert c5 == 6, f"Drand count mismatch: expected 6, got {c5}"
 
           c6 = parse_log("test_analyze.log", r"Ran 38 tests", r"Ran (\d+) tests")
           assert c6 == 38, f"Analyze count mismatch: expected 38, got {c6}"
@@ -214,8 +226,8 @@ jobs:
           Test Suite 1 (Bridge):         PASS ({c1}/{c1}) [measured]
           Test Suite 2 (Proof):          PASS ({c2}/{c2}) [measured]
           Test Suite 3 (Lifted):         PASS ({c3}/{c3}) [measured]
-          Test Suite 4 (Harness):        PASS (8/8) [measured]
-          Test Suite 5 (Drand):          PASS (6/6) [measured]
+          Test Suite 4 (Harness):        PASS ({c4}/{c4}) [measured]
+          Test Suite 5 (Drand):          PASS ({c5}/{c5}) [measured]
           Test Suite 6 (Analyze):        PASS ({c6}/{c6}) [measured]
           Test Suite 7 (Gate-1 Filter):  PASS ({c7}/{c7}, non-skippable 367 kill-test) [measured]
           Test Suite 8 (Build Pool):     PASS ({c8}/{c8}, deterministic orchestrator + real Lean integration) [measured]
