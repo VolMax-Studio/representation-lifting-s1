@@ -1142,6 +1142,17 @@ class TestAnalyzeCustody(unittest.TestCase):
         self.assertEqual(data["groupHash"], analyze.DRAND_QUICKNET_GROUP_HASH)
         self.assertEqual(data["groupHash"], "f477d5c89f21a17c863a7f937c6a6d15859414d2be09cd448d4279af331c5d3e")
 
+    def test_parse_pool_tsv_rejects_duplicate_case_id(self):
+        """Asserts that parse_pool_tsv globally rejects duplicate case_ids fail-closed."""
+        tsv_content = (
+            "case_id\tsource_name\n"
+            "proofnet-001\tArtin_exercise_2_2_9\n"
+            "proofnet-001\tRudin_exercise_4_8a\n"
+        )
+        with self.assertRaises(analyze.InputContractError) as ctx:
+            analyze.parse_pool_tsv(tsv_content)
+        self.assertIn("Duplicate case_id 'proofnet-001' detected in POOL.tsv data row 2", str(ctx.exception))
+
 if __name__ == "__main__":
     unittest.main()
 

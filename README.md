@@ -131,10 +131,14 @@ python3 tests/test_nontriviality_filter.py # Verifies Gate 1 input contract, anc
     - `QUICKNET_GROUP_HASH` is pinned as a constant in `tools/drand_schedule.py` and exported through `tools/analyze.py`.
     - `tools/analyze.py` strictly validates `public_key_hex` and its 96-byte length against the pinned constant.
     - Packaging enforces mechanical set equality $\operatorname{set}(\text{manifest}) \equiv \operatorname{set}(\text{packaged}) \setminus \{\text{MANIFEST.sha256}\}$, guaranteeing 100% cryptographic coverage of all repository payload files with zero `sha256sum -c` failures.
-17. **Gate-1 Input Contract & Tri-State Nontriviality Adjudicator (v0.20 Amendment):**
+17. **Gate-1 Input Contract & ProofNet Dataset Pinning (v0.20 Amendment):**
     - Preserves ratified `representation-lifting-s1-freeze-v0.19` baseline tag as historically immutable.
-    - Implemented `tools/extract_proofnet_statement.py`: anchored, fail-closed extraction that strips only trailing proof placeholders (`:= by sorry` / `:= sorry`), eliminates syntax collisions, and hoists imports to the file head.
+    - Implemented `tools/extract_proofnet_statement.py`: anchored, fail-closed extraction that strips only trailing proof placeholders (`:= by sorry` / `:= sorry`), eliminates syntax collisions, and hoists imports to the file head. CLI validation mode verifies all 367 entries and their SHA-256 in one pass.
     - Upgraded `tools/nontriviality_filter.sh` to a tri-state adjudicator ($0 = \text{NONTRIVIAL}$, $1 = \text{TRIVIAL}$, $2 = \text{INPUT\_ERROR / BASELINE\_INVALID}$) with mandatory fail-closed baseline elaboration check using `sorry`.
     - Eliminates false-negative parse-failure vulnerability, ensuring syntax errors fail closed as input errors rather than passing as nontrivial.
-    - Verified by `tests/test_nontriviality_filter.py` including a 367/367 entry kill-test on the ProofNet-Verified dataset.
+    - Authoritative ProofNet commit pinned: `160414332dc196583f6c37c310b420d2a3b07c58` (repo `https://github.com/marcusm117/ProofNet-Verified.git`, `data/proofnet-verified.jsonl` SHA-256 `381f4a06548a4ff6d9b923633c94a97b9c70f41033e13023aae31e1161b7f142`).
+    - Unambiguous `case_id` format locked: `proofnet-{index:03d}` (from `proofnet-001` through `proofnet-367`), resolving source name collision on `Rudin_exercise_4_8a` (present at indices 168 and 351). `tools/analyze.py::parse_pool_tsv()` enforces global fail-closed rejection of duplicate `case_id`s.
+    - Verified by `tests/test_nontriviality_filter.py` with 16 comprehensive tests, including a **non-skippable** 367/367 entry kill-test asserting exact canonical JSONL SHA-256, unique case IDs, and zero leaked `sorry`. Missing dataset triggers an immediate hard test failure.
+    - `MANIFEST.sha256` updated to cover all 110 payload files with 0 failures on `sha256sum -c`.
+
 

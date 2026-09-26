@@ -20,11 +20,20 @@ import json
 import tempfile
 import subprocess
 
+import hashlib
+
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 TOOLS_DIR = os.path.join(PROJECT_ROOT, "tools")
 sys.path.insert(0, TOOLS_DIR)
 
-from extract_proofnet_statement import extract_canonical_statement, InputContractError
+from extract_proofnet_statement import (
+    extract_canonical_statement,
+    compute_case_id,
+    InputContractError,
+    PROOFNET_CANONICAL_COMMIT,
+    PROOFNET_CANONICAL_JSONL_SHA256,
+    PROOFNET_TOTAL_ENTRIES,
+)
 
 FILTER_SH = os.path.join(TOOLS_DIR, "nontriviality_filter.sh")
 DEFAULT_PROOFNET_PATH = os.path.abspath(os.path.join(PROJECT_ROOT, "..", "..", "ARCHIVE_EXTERNAL", "ProofNet-Verified", "data", "proofnet-verified.jsonl"))
@@ -114,19 +123,62 @@ class TestGate1InputContract(unittest.TestCase):
         with self.assertRaises(InputContractError):
             extract_canonical_statement({"name": "foo"})
 
+    def test_compute_case_id(self):
+        self.assertEqual(compute_case_id(1), "proofnet-001")
+        self.assertEqual(compute_case_id(42), "proofnet-042")
+        self.assertEqual(compute_case_id(168), "proofnet-168")
+        self.assertEqual(compute_case_id(351), "proofnet-351")
+        self.assertEqual(compute_case_id(367), "proofnet-367")
+
     def test_extractor_kill_test_all_proofnet_entries(self):
-        """Kill-test: Asserts all 367 entries in ProofNet-Verified extract cleanly with zero leakage."""
+        """
+        Kill-test: Asserts all 367 entries in ProofNet-Verified extract cleanly with zero leakage.
+        NON-SKIPPABLE: Missing or altered ProofNet-Verified dataset is a hard failure.
+        """
         if not os.path.exists(PROOFNET_JSONL):
-            self.skipTest(f"ProofNet JSONL not found at {PROOFNET_JSONL}")
+            self.fail(
+                f"HARD_FAILURE: ProofNet JSONL required for protocol verification not found at: {PROOFNET_JSONL}\n"
+                f"Canonical source must be present at commit {PROOFNET_CANONICAL_COMMIT} with SHA-256 {PROOFNET_CANONICAL_JSONL_SHA256}."
+            )
 
-        with open(PROOFNET_JSONL, "r", encoding="utf-8") as f:
-            entries = [json.loads(line) for line in f if line.strip()]
+        with open(PROOFNET_JSONL, "rb") as bf:
+            file_bytes = bf.read()
+        file_sha = hashlib.sha256(file_bytes).hexdigest()
+        self.assertEqual(
+            file_sha,
+            PROOFNET_CANONICAL_JSONL_SHA256,
+            f"ProofNet JSONL SHA-256 mismatch! Expected {PROOFNET_CANONICAL_JSONL_SHA256}, got {file_sha}"
+        )
 
-        self.assertEqual(len(entries), 367, "ProofNet-Verified must contain exactly 367 entries")
+        entries = [json.loads(line) for line in file_bytes.decode("utf-8").splitlines() if line.strip()]
+        self.assertEqual(len(entries), PROOFNET_TOTAL_ENTRIES, f"ProofNet-Verified must contain exactly {PROOFNET_TOTAL_ENTRIES} entries")
+
+        seen_indices = set()
+        seen_case_ids = set()
+        rudin_indices = []
+
         for e in entries:
+            idx = e.get("index")
+            self.assertIsInstance(idx, int)
+            self.assertNotIn(idx, seen_indices, f"Duplicate index {idx}")
+            seen_indices.add(idx)
+
+            cid = compute_case_id(idx)
+            self.assertNotIn(cid, seen_case_ids, f"Duplicate case_id {cid}")
+            seen_case_ids.add(cid)
+
+            if e.get("name") == "Rudin_exercise_4_8a":
+                rudin_indices.append(idx)
+
             decl = extract_canonical_statement(e)
-            self.assertTrue(decl.startswith("import Mathlib"), f"{e['name']}: must start with import Mathlib")
-            self.assertNotIn("sorry", decl, f"{e['name']}: extracted declaration leaked 'sorry'")
+            self.assertTrue(decl.startswith("import Mathlib"), f"{e['name']} ({cid}): must start with import Mathlib")
+            self.assertNotIn("sorry", decl, f"{e['name']} ({cid}): extracted declaration leaked 'sorry'")
+
+        # Assert duplicate name occurrence at indices 168 and 351 with unique case_ids
+        self.assertEqual(rudin_indices, [168, 351], "Rudin_exercise_4_8a must occur exactly at indices 168 and 351")
+        self.assertIn("proofnet-168", seen_case_ids)
+        self.assertIn("proofnet-351", seen_case_ids)
+        self.assertEqual(len(seen_case_ids), 367)
 
     # -------------------------------------------------------------------------
     # Nontriviality Filter Tri-State Contract Tests

@@ -79,11 +79,16 @@ Both branches ($L$ and $D$) execute $T_2$ as a **real cumulative compilation art
 Evaluates whether Role S can discover a valid representation stub on three theorem statements drawn blindly from the ProofNet-Verified pool via drand quicknet random beacon.
 
 - **Candidate Pool Source:** ProofNet-Verified (367 base formal theorems).
+  - Canonical Repository: `https://github.com/marcusm117/ProofNet-Verified.git`
+  - Authoritative Commit Pin: `160414332dc196583f6c37c310b420d2a3b07c58` (HEAD; byte-for-byte identical to tag `v4.28.0` commit `2171d05b6929db38dedc545f150bd52284e48fd8` on `data/proofnet-verified.jsonl`)
+  - Canonical JSONL File: `data/proofnet-verified.jsonl`
+  - Canonical JSONL SHA-256: `381f4a06548a4ff6d9b923633c94a97b9c70f41033e13023aae31e1161b7f142` (367 records)
+  - Canonical `case_id` Format: `proofnet-{index:03d}` (from `proofnet-001` through `proofnet-367`), derived directly from the unique 1-based JSONL `index` field. Resolves duplicate source name collision (`Rudin_exercise_4_8a` present at index 168 and index 351).
 - **Mechanical Exclusion Criteria:**
   1. `tools/extract_proofnet_statement.py`: Anchored, fail-closed extraction from ProofNet-Verified JSONL, stripping trailing proof placeholders (`:=\s*(?:by\s*)?sorry\s*$`).
   2. `tools/nontriviality_filter.sh`: Tri-state fail-closed test against 4 basic tactics under `maxHeartbeats 200000` (`rfl`, `decide`, `linarith`, `ring`). Mandatory baseline elaboration check with `sorry` enforces fail-closed rejection of syntax/parse errors ($2 = \text{INPUT\_ERROR / BASELINE\_INVALID}$). Excludes tactic trivialities ($1 = \text{TRIVIAL}$).
   3. Pinned Toolchain Compatibility: Verbatim elaboration check under Lean 4 v4.34.0.
-- **Candidate Pool Frozen Artifact:** `POOL.tsv` (sorted lexicographically by ProofNet ID; canonical SHA-256 published prior to drand round).
+- **Candidate Pool Frozen Artifact:** `POOL.tsv` (sorted lexicographically by unique `case_id`; column 1 is `case_id`, column 2 is `source_name`; canonical SHA-256 published prior to drand round). `tools/analyze.py::parse_pool_tsv()` enforces global fail-closed rejection of duplicate `case_id`s.
 - **Deterministic Rejection-Sampling Formula (`tools/select_indices.py`):**  
   To eliminate modulo bias and guarantee uniform selection over pool size $N = |P|$, indices are sampled via domain-separated SHA-256 with rejection sampling:
   $$H_j = \operatorname{SHA256}(\texttt{"representation-lifting-s1/v0.1\textbackslash0"} \parallel R \parallel \operatorname{uint64be}(j))$$
@@ -124,21 +129,33 @@ Evaluates whether the formalization footprint metric and harness scoring infrast
 ## 3. External Pool Sampling, drand Selection Custody Protocol, & External Root-of-Trust Contract
 
 ### 3.1 Source Corpus & Filtering Pipeline
-1. **Base Corpus:** `ProofNet-Verified` (commit-pinned repository, containing 367 source cases).
-2. **Elimination of Subjective Domain Filter:**  
+1. **Base Corpus:** `ProofNet-Verified` commit-pinned repository:
+   - **Repository URL:** `https://github.com/marcusm117/ProofNet-Verified.git`
+   - **Pinned Commit:** `160414332dc196583f6c37c310b420d2a3b07c58` (HEAD)
+   - **Compatible Tag:** `v4.28.0` (`2171d05b6929db38dedc545f150bd52284e48fd8`, byte-for-byte identical JSONL)
+   - **Relative Path:** `data/proofnet-verified.jsonl`
+   - **Canonical SHA-256:** `381f4a06548a4ff6d9b923633c94a97b9c70f41033e13023aae31e1161b7f142`
+   - **Exact Entry Count:** 367 records
+2. **Canonical Identification & Collision Resolution:**
+   - ProofNet contains 367 entries with 367 unique `index` values (1 to 367), but only 366 unique `name` strings (`Rudin_exercise_4_8a` appears at index 168 and index 351 with distinct statements).
+   - Canonical `case_id` is defined as `proofnet-{index:03d}` (from `proofnet-001` through `proofnet-367`).
+   - `POOL.tsv` stores `case_id` in column 1 and original `source_name` in column 2.
+   - `tools/analyze.py::parse_pool_tsv()` enforces a global fail-closed check rejecting duplicate `case_id`s.
+3. **Elimination of Subjective Domain Filter:**  
    Because ProofNet-Verified lacks an authoritative `NumberTheory`/`Algebra` column in its published schema, **no manual domain classification is permitted**. All 367 cases enter the mechanical pipeline. If a topological or analytic problem fails to yield a representation lift, that failure is recorded as an authentic `LIFT-NOT-FOUND`.
-3. **Anchored ProofNet Canonical Extraction (`tools/extract_proofnet_statement.py`):**  
+4. **Anchored ProofNet Canonical Extraction (`tools/extract_proofnet_statement.py`):**  
    - ProofNet-Verified `formal_stmt` fields end with proof placeholders (`:= by sorry` or `:= sorry`).
    - Direct concatenation with tactic probes would create syntax errors (`... := by sorry := by rfl`), causing false-negative tactic failures where all cases pass as nontrivial.
    - Canonical extraction strictly asserts exactly one `sorry` per record and removes only the anchored trailing proof placeholder `:=\s*(?:by\s*)?sorry\s*$`.
    - All `import` lines from `header`, `helper`, and declaration are hoisted to the head of the file.
    - Fails closed as `INPUT_ERROR` on any syntax ambiguity or extra `sorry`.
-4. **Tri-State Mechanical Nontriviality Filter (`tools/nontriviality_filter.sh`):**  
+   - CLI execution against the JSONL validates all 367 entries and their SHA-256 in one pass.
+5. **Tri-State Mechanical Nontriviality Filter (`tools/nontriviality_filter.sh`):**  
    - Enforces strict tri-state fail-closed semantics:
      - `0`: **`NONTRIVIAL`** — Baseline elaboration with `sorry` passes under Lean 4 v4.34.0, and all 4 basic tactics fail to prove the statement.
      - `1`: **`TRIVIAL`** — Proved by at least one of `rfl`, `decide`, `linarith`, `ring` under `set_option maxHeartbeats 200000`. Excluded from pool.
      - `2`: **`INPUT_ERROR / BASELINE_INVALID`** — Fails baseline elaboration with `sorry` (syntax error, undeclared identifier, unstripped sorry, etc.). Halts evaluation for that record with explicit exclusion/error log; never classified as `NONTRIVIAL`.
-5. **Verbatim Toolchain Compilation Filter:**  
+6. **Verbatim Toolchain Compilation Filter:**  
    Statements must compile verbatim under Lean 4 v4.34.0. Incompatible cases are logged to `EXCLUDED_TOOLCHAIN_INCOMPATIBLE.tsv`.
 
 ### 3.2 Pool Exhaustion & Insufficient Pool Rule
@@ -567,13 +584,21 @@ $$\boxed{\text{Trusted Computing Base (TCB)}}$$
   - **Cross-Relay Canonical Equality Test:** New `test_cross_relay_canonical_provenance` proves that `json.dumps(sort_keys=True)` output is identical across all three relay archives.
   - **Pinned `QUICKNET_GROUP_HASH` Constant:** Added `QUICKNET_GROUP_HASH = "f477d5c89f21a17c863a7f937c6a6d15859414d2be09cd448d4279af331c5d3e"` to `tools/drand_schedule.py` and exported via `tools/analyze.py` (`DRAND_QUICKNET_GROUP_HASH`). Both `tests/test_analyze.py` and `tests/test_drand_schedule.py` now explicitly assert this pinned constant against the raw root.
   - **Manifest Self-Referential Paradox Resolved:** Excluded `MANIFEST.sha256` from hashing itself, eliminating the dummy hash entry (`e3b0c44…`). The packaging invariant is formalized as $\operatorname{set}(\text{manifest\_paths}) \equiv \operatorname{set}(\text{packaged\_source\_paths}) \setminus \{\text{MANIFEST.sha256}\}$, guaranteeing `sha256sum -c MANIFEST.sha256` passes with 0 failures across all 107 repository payload files.
-- **Amendment 0.19 $\to$ 0.20 (Current / Gate-1 Input Contract Amendment):**
+- **Amendment 0.19 $\to$ 0.20 (Current / Gate-1 Input Contract & ProofNet Pinning Amendment):**
   - **Preservation of Ratified Baseline:** The human-ratified tag `representation-lifting-s1-freeze-v0.19` (commit `f2cae4d`) remains historically intact and cryptographically pinned. This amendment is adopted before pool generation, timestamp anchor, or drand sampling, ensuring **zero outcome leakage**.
-  - **Root Cause:** In v0.19, `tools/nontriviality_filter.sh` appended `:= by $TAC` directly to target snippets. Because ProofNet-Verified theorem statements already terminate with `:= by sorry` or `:= sorry`, direct concatenation produced invalid Lean syntax (`:= by sorry := by rfl`), causing Lean elaboration to fail on all tactics and creating a critical false-negative vulnerability (trivial theorems passing as NONTRIVIAL due to parse failure).
-  - **Anchored, Fail-Closed Canonical Extraction (`tools/extract_proofnet_statement.py`):** Implemented mechanical extractor that strictly verifies exactly one `sorry` per record, strips only the anchored trailing proof placeholder `:=\s*(?:by\s*)?sorry\s*$`, hoists all imports to the head of the file, and fails closed (`INPUT_ERROR`) on any formatting anomaly. Validated across all 367 ProofNet-Verified records with zero errors.
+  - **Root Cause of Gate-1 Vulnerability:** In v0.19, `tools/nontriviality_filter.sh` appended `:= by $TAC` directly to target snippets. Because ProofNet-Verified theorem statements already terminate with `:= by sorry` or `:= sorry`, direct concatenation produced invalid Lean syntax (`:= by sorry := by rfl`), causing Lean elaboration to fail on all tactics and creating a critical false-negative vulnerability (trivial theorems passing as NONTRIVIAL due to parse failure).
+  - **Anchored, Fail-Closed Canonical Extraction (`tools/extract_proofnet_statement.py`):** Implemented mechanical extractor that strictly verifies exactly one `sorry` per record, strips only the anchored trailing proof placeholder `:=\s*(?:by\s*)?sorry\s*$`, hoists all imports to the head of the file, and fails closed (`INPUT_ERROR`) on any formatting anomaly. Validated across all 367 ProofNet-Verified records with zero errors. Full CLI validation mode (`extract_proofnet_statement.py <path>`) verifies SHA-256 and extracts all 367 statements in one pass.
+  - **Authoritative ProofNet Corpus Pinning:**
+    - Canonical Repository: `https://github.com/marcusm117/ProofNet-Verified.git`
+    - Pinned Commit: `160414332dc196583f6c37c310b420d2a3b07c58` (HEAD; byte-for-byte identical to tag `v4.28.0` commit `2171d05b6929db38dedc545f150bd52284e48fd8` on `data/proofnet-verified.jsonl`)
+    - Canonical JSONL File: `data/proofnet-verified.jsonl`
+    - Canonical JSONL SHA-256: `381f4a06548a4ff6d9b923633c94a97b9c70f41033e13023aae31e1161b7f142` (367 records)
+  - **Case ID Collision Resolution (`proofnet-{index:03d}`):** The ProofNet dataset has 367 entries and 367 unique `index` values, but only 366 unique `name` strings (`Rudin_exercise_4_8a` appears twice: at index 168 and index 351, with distinct mathematical statements). To eliminate collision risk before selection, canonical `case_id` is defined as `proofnet-{index:03d}` (from `proofnet-001` through `proofnet-367`), with `source_name` preserved as column 2 in `POOL.tsv`.
+  - **Global Fail-Closed Duplicate Check (`tools/analyze.py`):** `parse_pool_tsv()` parses row-by-row and strictly raises `InputContractError` if any duplicate `case_id` is detected.
   - **Tri-State Nontriviality Filter Contract (`tools/nontriviality_filter.sh`):**
     - `0`: `NONTRIVIAL` (baseline elaboration with `sorry` passes; all 4 tactics `rfl`, `decide`, `linarith`, `ring` fail to prove statement under 200,000 heartbeats).
     - `1`: `TRIVIAL` (proved by at least one tactic).
     - `2`: `INPUT_ERROR / BASELINE_INVALID` (baseline elaboration with `sorry` fails; syntax error; unstripped `sorry`; or missing file). Exit code 2 halts the case and emits an explicit exclusion record; it is never treated as a tactic failure.
-  - **Adversarial Regression Test Suite (`tests/test_nontriviality_filter.py`):** Added 15 comprehensive tests covering all 4 tactics, non-trivial statements, adversarial syntax errors, unstripped `sorry` rejection, and a full 367-entry kill-test against the live ProofNet-Verified dataset.
+  - **Adversarial Regression Test Suite (`tests/test_nontriviality_filter.py`):** Added 16 comprehensive tests covering all 4 tactics, non-trivial statements, adversarial syntax errors, unstripped `sorry` rejection, and a **non-skippable** 367-entry kill-test that asserts exact canonical JSONL SHA-256, unique case IDs, and zero leaked `sorry`. Missing dataset triggers an immediate hard failure (no `skipTest`).
+  - **Manifest Coverage Expansion:** `MANIFEST.sha256` expands to 110 payload files (+`PREREGISTRATION_v0.20_CANDIDATE.md`, +`tools/extract_proofnet_statement.py`, +`tests/test_nontriviality_filter.py`), strictly preserving set equality $\operatorname{set}(\text{manifest}) \equiv \operatorname{set}(\text{packaged}) \setminus \{\text{MANIFEST.sha256}\}$ with 0 failures on `sha256sum -c`.
   - **Zero Protocol Drift:** No changes made to Lean verification kernel, H1/H2 hypothesis rules, selection custody, drand parameters, executor state machines, models, control matrix, or analysis adjudicator.

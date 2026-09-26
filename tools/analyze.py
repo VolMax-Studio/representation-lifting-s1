@@ -126,10 +126,14 @@ def parse_pool_tsv(pool_input: str | bytes) -> tuple[bytes, list[str]]:
         raise InputContractError("POOL.tsv contains no data rows.")
 
     case_ids = []
-    for line in data_lines:
+    seen_case_ids = set()
+    for line_idx, line in enumerate(data_lines, start=1):
         cid = line.split("\t")[0].strip()
         if not cid:
-            raise InputContractError("Found empty case_id in POOL.tsv data row.")
+            raise InputContractError(f"Found empty case_id in POOL.tsv data row {line_idx}.")
+        if cid in seen_case_ids:
+            raise InputContractError(f"Duplicate case_id '{cid}' detected in POOL.tsv data row {line_idx}.")
+        seen_case_ids.add(cid)
         case_ids.append(cid)
 
     return pool_bytes, case_ids
