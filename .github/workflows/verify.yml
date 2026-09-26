@@ -61,9 +61,10 @@ jobs:
           set -euo pipefail
           lake exe cache get
 
-      - name: Build verifier binary
+      - name: Build Mathlib and verifier binary
         run: |
           set -euo pipefail
+          lake build Mathlib
           lake build verifier
 
       - name: Verify manifest integrity
