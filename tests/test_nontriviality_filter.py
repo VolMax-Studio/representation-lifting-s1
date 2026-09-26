@@ -186,33 +186,33 @@ class TestGate1InputContract(unittest.TestCase):
 
     def test_filter_trivial_rfl(self):
         code = "theorem test_rfl : 1 = 1"
-        rc, out, _ = self.run_filter(code)
-        self.assertEqual(rc, 1, f"Expected TRIVIAL (1), got {rc}: {out}")
+        rc, out, err = self.run_filter(code)
+        self.assertEqual(rc, 1, f"Expected TRIVIAL (1), got {rc}: out={out!r} err={err!r}")
         self.assertIn("TRIVIAL: Solved by tactic", out)
 
     def test_filter_trivial_decide(self):
         code = "theorem test_decide : 2 + 2 = 4"
-        rc, out, _ = self.run_filter(code)
-        self.assertEqual(rc, 1, f"Expected TRIVIAL (1), got {rc}: {out}")
+        rc, out, err = self.run_filter(code)
+        self.assertEqual(rc, 1, f"Expected TRIVIAL (1), got {rc}: out={out!r} err={err!r}")
         self.assertIn("TRIVIAL: Solved by tactic", out)
 
     def test_filter_trivial_ring(self):
         code = "theorem test_ring (x y : ℤ) : (x + y)^2 = x^2 + 2*x*y + y^2"
-        rc, out, _ = self.run_filter(code)
-        self.assertEqual(rc, 1, f"Expected TRIVIAL (1), got {rc}: {out}")
+        rc, out, err = self.run_filter(code)
+        self.assertEqual(rc, 1, f"Expected TRIVIAL (1), got {rc}: out={out!r} err={err!r}")
         self.assertIn("TRIVIAL: Solved by tactic", out)
 
     def test_filter_trivial_linarith(self):
         code = "theorem test_linarith (x y : ℤ) (h1 : x < y) (h2 : y < x) : False"
-        rc, out, _ = self.run_filter(code)
-        self.assertEqual(rc, 1, f"Expected TRIVIAL (1), got {rc}: {out}")
+        rc, out, err = self.run_filter(code)
+        self.assertEqual(rc, 1, f"Expected TRIVIAL (1), got {rc}: out={out!r} err={err!r}")
         self.assertIn("TRIVIAL: Solved by tactic", out)
 
     def test_filter_nontrivial_statement(self):
         # A true non-trivial statement that cannot be solved by rfl, decide, linarith, or ring
         code = "theorem test_nontrivial (n : ℕ) (h : n > 2) (x y z : ℕ) (hx : x > 0) (hy : y > 0) (hz : z > 0) : x^n + y^n ≠ z^n"
-        rc, out, _ = self.run_filter(code)
-        self.assertEqual(rc, 0, f"Expected NONTRIVIAL (0), got {rc}: {out}")
+        rc, out, err = self.run_filter(code)
+        self.assertEqual(rc, 0, f"Expected NONTRIVIAL (0), got {rc}: out={out!r} err={err!r}")
         self.assertIn("NONTRIVIAL: Passed all 4 basic tactic tests.", out)
 
     def test_filter_adversarial_syntax_error_fails_closed(self):

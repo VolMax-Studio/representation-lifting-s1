@@ -91,13 +91,14 @@ def default_lean_runner(
     """
     env = get_project_lean_env(project_root)
     file_id = uuid.uuid4().hex[:12]
-    temp_lean = os.path.join(_BUILD_DIR, f"candidate_{file_id}.lean")
+    temp_lean = os.path.join(_BUILD_DIR, f"Candidate_{file_id}.lean")
+    temp_olean = os.path.join(_BUILD_DIR, f"Candidate_{file_id}.olean")
     with open(temp_lean, "w", encoding="utf-8") as f:
         f.write(code)
 
     try:
         proc = subprocess.run(
-            ["lake", "env", "lean", temp_lean],
+            ["lake", "env", "lean", "-o", temp_olean, temp_lean],
             cwd=project_root,
             env=env,
             capture_output=True,
@@ -114,11 +115,12 @@ def default_lean_runner(
             stderr = stderr.decode("utf-8", errors="replace")
         return -1, stdout, stderr, True
     finally:
-        if os.path.exists(temp_lean):
-            try:
-                os.remove(temp_lean)
-            except OSError:
-                pass
+        for p in (temp_lean, temp_olean):
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
 
 def build_wrapped_lean_code(
     stripped_decl: str,
