@@ -17,17 +17,17 @@ jobs:
       - name: Checkout target commit
         uses: actions/checkout@v4
         with:
-          ref: 6d2c845f59ee1429132800ba41bdbf8d1d252af5
+          ref: 7bc916627c5cadffdc470da9b0fb74fbcf824e44
 
       - name: Assert exact target commit
         run: |
           set -euo pipefail
           ACTUAL_COMMIT="$(git rev-parse HEAD)"
-          EXPECTED_COMMIT="6d2c845f59ee1429132800ba41bdbf8d1d252af5"
+          EXPECTED_COMMIT="7bc916627c5cadffdc470da9b0fb74fbcf824e44"
           echo "Checked out commit: $ACTUAL_COMMIT"
           echo "Expected commit:   $EXPECTED_COMMIT"
           test "$ACTUAL_COMMIT" = "$EXPECTED_COMMIT"
-          echo "COMMIT VERIFIED: Exactly 6d2c845f59ee1429132800ba41bdbf8d1d252af5"
+          echo "COMMIT VERIFIED: Exactly 7bc916627c5cadffdc470da9b0fb74fbcf824e44"
 
       - name: Clone pinned ProofNet-Verified repository
         run: |
@@ -71,8 +71,8 @@ jobs:
           set -euo pipefail
           sha256sum -c MANIFEST.sha256
           COUNT="$(sha256sum -c MANIFEST.sha256 | wc -l)"
-          test "$COUNT" -eq 112
-          echo "MANIFEST INTEGRITY: 112/112 OK (0 failures)"
+          test "$COUNT" -eq 113
+          echo "MANIFEST INTEGRITY: 113/113 OK (0 failures)"
 
       - name: Run full test suite
         run: |
@@ -163,8 +163,8 @@ jobs:
           c7 = parse_log("test_nontriviality_filter.log", r"Ran 16 tests", r"Ran (\d+) tests")
           assert c7 == 16, f"Nontriviality count mismatch: expected 16, got {c7}"
 
-          c8 = parse_log("test_build_pool.log", r"Ran 4 tests", r"Ran (\d+) tests")
-          assert c8 == 4, f"Build pool count mismatch: expected 4, got {c8}"
+          c8 = parse_log("test_build_pool.log", r"Ran 6 tests", r"Ran (\d+) tests")
+          assert c8 == 6, f"Build pool count mismatch: expected 6, got {c8}"
 
           c_ext = parse_log("extract_proofnet_statement.log", r"Status:\s+PASS", r"Total entries:\s+(\d+)/367")
           assert c_ext == 367, f"Extractor entry count mismatch: expected 367, got {c_ext}"
@@ -197,7 +197,7 @@ jobs:
           Lake Mathlib Rev:    {mathlib_rev}
           ProofNet Pinned Rev: 160414332dc196583f6c37c310b420d2a3b07c58
           ProofNet JSONL SHA:  381f4a06548a4ff6d9b923633c94a97b9c70f41033e13023aae31e1161b7f142
-          Manifest Integrity:  {manifest_count}/112 verified OK (0 failures)
+          Manifest Integrity:  {manifest_count}/113 verified OK (0 failures)
           Test Suite 1 (Bridge):         PASS ({c1}/{c1}) [measured]
           Test Suite 2 (Proof):          PASS ({c2}/{c2}) [measured]
           Test Suite 3 (Lifted):         PASS ({c3}/{c3}) [measured]
@@ -205,7 +205,7 @@ jobs:
           Test Suite 5 (Drand):          PASS (6/6) [measured]
           Test Suite 6 (Analyze):        PASS ({c6}/{c6}) [measured]
           Test Suite 7 (Gate-1 Filter):  PASS ({c7}/{c7}, non-skippable 367 kill-test) [measured]
-          Test Suite 8 (Build Pool):     PASS ({c8}/{c8}, deterministic orchestrator) [measured]
+          Test Suite 8 (Build Pool):     PASS ({c8}/{c8}, deterministic orchestrator + real Lean integration) [measured]
           ProofNet Full Extraction CLI: PASS ({c_ext}/{c_ext} canonical declarations, 0 sorry) [measured]
           Overall Verdict:               PASS (all 9 suites verified from parsed execution logs)
           ================================================================================
