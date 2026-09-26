@@ -1116,18 +1116,19 @@ class TestAnalyzeCustody(unittest.TestCase):
 
     def test_drand_quicknet_constants_against_archived_root(self):
         """
-        Verifies that all 5 drand quicknet constants in analyze.py and drand_schedule.py
-        match the archived external root from the official /info endpoint.
+        Verifies that all 6 drand quicknet fields in analyze.py and drand_schedule.py
+        match the archived raw /info API response, including groupHash which caught
+        the v0.18 manual-copy provenance error.
         """
-        root_path = os.path.join(PROJECT_ROOT, "external_roots", "drand_quicknet_info.json")
-        self.assertTrue(os.path.exists(root_path), "external_roots/drand_quicknet_info.json must exist")
+        root_path = os.path.join(PROJECT_ROOT, "external_roots", "drand_quicknet_info_api.raw.json")
+        self.assertTrue(os.path.exists(root_path), "external_roots/drand_quicknet_info_api.raw.json must exist")
         
         with open(root_path, "rb") as f:
             content = f.read()
         
-        # Verify SHA-256 of archived file
+        # Verify SHA-256 of archived raw file (byte-for-byte from curl)
         file_hash = hashlib.sha256(content).hexdigest()
-        self.assertEqual(file_hash, "7054e0f425907deee8f5a0dfc112c5a1a040914fa1ebb139285b57cdd9d6ead3")
+        self.assertEqual(file_hash, "3e690bc527c8a4e78232bc06b5a3cff057c51c68f51b208a1a21b2abd6d6b194")
 
         data = json.loads(content.decode("utf-8"))
         self.assertEqual(data["hash"], analyze.QUICKNET_CHAIN_HASH)
@@ -1136,6 +1137,8 @@ class TestAnalyzeCustody(unittest.TestCase):
         self.assertEqual(data["schemeID"], analyze.DRAND_QUICKNET_SCHEME_ID)
         self.assertEqual(data["public_key"], analyze.DRAND_QUICKNET_PUBLIC_KEY_HEX)
         self.assertEqual(len(bytes.fromhex(data["public_key"])), 96)
+        # groupHash: not used by analyzer, but verified to prove archive authenticity
+        self.assertEqual(data["groupHash"], "f477d5c89f21a17c863a7f937c6a6d15859414d2be09cd448d4279af331c5d3e")
 
 if __name__ == "__main__":
     unittest.main()

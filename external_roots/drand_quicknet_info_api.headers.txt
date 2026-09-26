@@ -1,8 +1,0 @@
-HTTP/2 200 
-date: Fri, 25 Sep 2026 21:46:47 GMT
-content-type: application/json
-content-length: 472
-server: nginx/1.28.3
-access-control-allow-origin: *
-vary: Origin
-

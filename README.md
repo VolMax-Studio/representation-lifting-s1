@@ -121,8 +121,12 @@ python3 tests/test_analyze.py           # Verifies deterministic analysis custod
     - `analyze.py` scope is explicitly bounded: it deterministically reproduces the selection conditional on externally verified receipts, but does not self-attest external facts.
     - `pool_anchor_receipt.json` anchors pool existence prior to beacon round via public append-only transparency log (Rekor / RFC 3161 / OpenTimestamps). Missing receipt $\implies$ `NOT_EVALUABLE_POOL_TIMESTAMP`.
     - `beacon_verification_receipt.json` anchors BLS threshold signature authenticity against quicknet's public key (`83cf0f28…`) via official drand-client verification. Missing receipt $\implies$ `NOT_EVALUABLE_BEACON_AUTHENTICITY`.
-16. **Archived drand External Root-of-Trust & Full Manifest Coverage:**
-    - `external_roots/drand_quicknet_info.json` pins the official `/info` response (SHA-256 `7054e0f425907deee8f5a0dfc112c5a1a040914fa1ebb139285b57cdd9d6ead3`), locking chain hash, genesis, period, and 96-byte G2 public key.
+16. **Archived drand External Root-of-Trust & Multi-Relay Provenance (v0.19):**
+    - `external_roots/drand_quicknet_info_api.raw.json` is a byte-for-byte `curl` download from `api.drand.sh`, raw SHA-256 `3e690bc5…6b194`.
+    - `external_roots/drand_quicknet_info_relay2.raw.json` is the same from `api2.drand.sh` (raw SHA-256 identical).
+    - `external_roots/drand_quicknet_info_cloudflare.raw.json` is from `drand.cloudflare.com` (trailing newline, raw SHA differs, canonical JSON identical).
+    - Each `.raw.json` has a companion `.meta.json` recording URL, UTC fetch time, HTTP status, raw SHA-256, and cross-relay canonical match status.
+    - Tests verify all 6 fields (`public_key`, `period`, `genesis_time`, `hash`, `groupHash`, `schemeID`) against the archived raw file, and cross-check canonical equality across all three relays.
     - `tools/analyze.py` strictly validates `public_key_hex` and its 96-byte length against the pinned constant.
     - Packaging enforces mechanical set equality $\operatorname{set}(\text{manifest}) \equiv \operatorname{set}(\text{packaged})$, guaranteeing 100% cryptographic coverage of all repository files.
 

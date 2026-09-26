@@ -1,0 +1,13 @@
+{
+  "source_url": "https://drand.cloudflare.com/52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971/info",
+  "relay": "drand.cloudflare.com",
+  "fetched_utc": "2026-09-25T21:46:57Z",
+  "http_status": 200,
+  "content_type": "application/json",
+  "content_length_bytes": 473,
+  "raw_sha256": "1ae9f5818c8a16dc22001413a79f0f08fa655f9d4790d659cb3f60e94577bad7",
+  "canonical_json_sha256": "d64db296ef8d45fef61fa2e9256bf0931af24d61b698e726ce6efff2d800c06b",
+  "cross_relay_canonical_match": "PASS",
+  "cross_relay_partner": "api.drand.sh",
+  "note": "Raw bytes fetched via curl --fail --silent --show-error. File has trailing newline (473 vs 472 bytes), raw SHA differs from api relay, but canonical JSON (Python json.dumps sort_keys) is identical."
+}

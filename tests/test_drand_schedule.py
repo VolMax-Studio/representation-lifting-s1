@@ -85,17 +85,55 @@ def test_invariant_grid():
 def test_quicknet_constants():
     import json
     import hashlib
-    root_path = os.path.join(ROOT_DIR, "external_roots", "drand_quicknet_info.json")
+    root_path = os.path.join(ROOT_DIR, "external_roots", "drand_quicknet_info_api.raw.json")
     with open(root_path, "rb") as f:
         content = f.read()
-    assert hashlib.sha256(content).hexdigest() == "7054e0f425907deee8f5a0dfc112c5a1a040914fa1ebb139285b57cdd9d6ead3"
+    assert hashlib.sha256(content).hexdigest() == "3e690bc527c8a4e78232bc06b5a3cff057c51c68f51b208a1a21b2abd6d6b194"
     info = json.loads(content.decode("utf-8"))
     
     from tools.drand_schedule import QUICKNET_CHAIN_HASH, GENESIS_TIME, PERIOD_SECONDS
     assert QUICKNET_CHAIN_HASH == info["hash"]
     assert GENESIS_TIME == info["genesis_time"]
     assert PERIOD_SECONDS == info["period"]
-    print("test_quicknet_constants: PASS (verified against archived /info root)")
+    # v0.19: verify all fields, including groupHash which caught the v0.18 manual-copy error
+    assert info["groupHash"] == "f477d5c89f21a17c863a7f937c6a6d15859414d2be09cd448d4279af331c5d3e"
+    assert info["schemeID"] == "bls-unchained-g1-rfc9380"
+    print("test_quicknet_constants: PASS (verified against archived raw /info root)")
+
+def test_cross_relay_canonical_provenance():
+    """Proves the two archived relay responses are semantically identical."""
+    import json
+    import hashlib
+    api_path = os.path.join(ROOT_DIR, "external_roots", "drand_quicknet_info_api.raw.json")
+    relay2_path = os.path.join(ROOT_DIR, "external_roots", "drand_quicknet_info_relay2.raw.json")
+    cf_path = os.path.join(ROOT_DIR, "external_roots", "drand_quicknet_info_cloudflare.raw.json")
+
+    with open(api_path) as f:
+        api_data = json.load(f)
+    with open(relay2_path) as f:
+        relay2_data = json.load(f)
+
+    # Canonical equality: sorted-key, compact JSON
+    api_canonical = json.dumps(api_data, sort_keys=True, separators=(",", ":"))
+    relay2_canonical = json.dumps(relay2_data, sort_keys=True, separators=(",", ":"))
+    assert api_canonical == relay2_canonical, "api.drand.sh and api2.drand.sh disagree"
+
+    # Also verify cloudflare if present
+    if os.path.exists(cf_path):
+        with open(cf_path) as f:
+            cf_data = json.load(f)
+        cf_canonical = json.dumps(cf_data, sort_keys=True, separators=(",", ":"))
+        assert api_canonical == cf_canonical, "api.drand.sh and drand.cloudflare.com disagree"
+
+    # Verify meta files record the canonical SHA
+    meta_path = os.path.join(ROOT_DIR, "external_roots", "drand_quicknet_info_api.meta.json")
+    with open(meta_path) as f:
+        meta = json.load(f)
+    expected_canonical_sha = hashlib.sha256(api_canonical.encode()).hexdigest()
+    assert meta["canonical_json_sha256"] == expected_canonical_sha
+    assert meta["cross_relay_canonical_match"] == "PASS"
+
+    print("test_cross_relay_canonical_provenance: PASS (3 relays, canonical match)")
 
 if __name__ == "__main__":
     test_synthetic_parameters()
@@ -103,4 +141,5 @@ if __name__ == "__main__":
     test_quicknet_known_round()
     test_invariant_grid()
     test_quicknet_constants()
+    test_cross_relay_canonical_provenance()
     print("ALL DRAND SCHEDULE REGRESSION TESTS PASSED.")

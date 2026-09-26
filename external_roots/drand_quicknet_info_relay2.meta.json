@@ -1,0 +1,13 @@
+{
+  "source_url": "https://api2.drand.sh/52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971/info",
+  "relay": "api2.drand.sh",
+  "fetched_utc": "2026-09-26T05:21:41Z",
+  "http_status": 200,
+  "content_type": "application/json",
+  "content_length_bytes": 472,
+  "raw_sha256": "3e690bc527c8a4e78232bc06b5a3cff057c51c68f51b208a1a21b2abd6d6b194",
+  "canonical_json_sha256": "d64db296ef8d45fef61fa2e9256bf0931af24d61b698e726ce6efff2d800c06b",
+  "cross_relay_canonical_match": "PASS",
+  "cross_relay_partner": "api.drand.sh",
+  "note": "Raw bytes fetched via curl --fail --silent --show-error, no post-processing. canonical_json_sha256 is Python json.dumps(sort_keys=True, separators=(',',':'))."
+}
