@@ -80,31 +80,31 @@ jobs:
           set -euo pipefail
 
           echo "=== 1/8: Running test_check_bridge.py ==="
-          python3 tests/test_check_bridge.py | tee test_check_bridge.log
+          python3 tests/test_check_bridge.py 2>&1 | tee test_check_bridge.log
 
           echo "=== 2/8: Running test_verify_proof.py ==="
-          python3 tests/test_verify_proof.py | tee test_verify_proof.log
+          python3 tests/test_verify_proof.py 2>&1 | tee test_verify_proof.log
 
           echo "=== 3/8: Running test_verify_lifted.py ==="
-          python3 tests/test_verify_lifted.py | tee test_verify_lifted.log
+          python3 tests/test_verify_lifted.py 2>&1 | tee test_verify_lifted.log
 
           echo "=== 4/8: Running test_executor_harness.py ==="
-          python3 tests/test_executor_harness.py | tee test_executor_harness.log
+          python3 tests/test_executor_harness.py 2>&1 | tee test_executor_harness.log
 
           echo "=== 5/8: Running test_drand_schedule.py ==="
-          python3 tests/test_drand_schedule.py | tee test_drand_schedule.log
+          python3 tests/test_drand_schedule.py 2>&1 | tee test_drand_schedule.log
 
           echo "=== 6/8: Running test_analyze.py ==="
-          python3 tests/test_analyze.py | tee test_analyze.log
+          python3 tests/test_analyze.py 2>&1 | tee test_analyze.log
 
           echo "=== 7/8: Running test_nontriviality_filter.py (367 kill-test) ==="
-          python3 -m unittest -v tests/test_nontriviality_filter.py | tee test_nontriviality_filter.log
+          python3 -m unittest -v tests/test_nontriviality_filter.py 2>&1 | tee test_nontriviality_filter.log
 
           echo "=== 8/8: Running test_build_pool.py (deterministic builder) ==="
-          python3 -m unittest -v tests/test_build_pool.py | tee test_build_pool.log
+          python3 -m unittest -v tests/test_build_pool.py 2>&1 | tee test_build_pool.log
 
           echo "=== Extra: CLI Dataset Full Validation ==="
-          python3 tools/extract_proofnet_statement.py "$PROOFNET_JSONL" | tee extract_proofnet_statement.log
+          python3 tools/extract_proofnet_statement.py "$PROOFNET_JSONL" 2>&1 | tee extract_proofnet_statement.log
 
           echo "ALL TEST SUITES EXECUTED."
 
