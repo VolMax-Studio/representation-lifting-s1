@@ -17,7 +17,7 @@ jobs:
       - name: Checkout target commit
         uses: actions/checkout@v4
         with:
-          ref: f3c897813aeb69c6f2df2a73a6966fc29b71e161
+          ref: amend/gate1-input-contract-v0.20
 
       - name: Assert exact target commit
         run: |
