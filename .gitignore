@@ -13,3 +13,5 @@ tools/execution_receipt_*.json
 *.tmp
 tmp/
 *.zip
+.lake_*_build_*
+.lake_build_temp*

@@ -55,6 +55,7 @@ python3 tests/test_executor_harness.py  # Verifies state machine loops, truncati
 python3 tests/test_drand_schedule.py    # Verifies drand quicknet future-round invariants across 1000 grid points and pinned chain hash
 python3 tests/test_analyze.py           # Verifies deterministic analysis custody, completion categories, dual H1 inequalities, control veto, and aggregation
 python3 tests/test_nontriviality_filter.py # Verifies Gate 1 input contract, anchored extraction, and tri-state filter
+python3 tests/test_build_pool.py        # Verifies deterministic pool builder, partition invariant, and real Lean integration
 ```
 
 ---
@@ -131,16 +132,20 @@ python3 tests/test_nontriviality_filter.py # Verifies Gate 1 input contract, anc
     - `QUICKNET_GROUP_HASH` is pinned as a constant in `tools/drand_schedule.py` and exported through `tools/analyze.py`.
     - `tools/analyze.py` strictly validates `public_key_hex` and its 96-byte length against the pinned constant.
     - Packaging enforces mechanical set equality $\operatorname{set}(\text{manifest}) \equiv \operatorname{set}(\text{packaged}) \setminus \{\text{MANIFEST.sha256}\}$, guaranteeing 100% cryptographic coverage of all repository payload files with zero `sha256sum -c` failures.
-17. **Gate-1 Input Contract & ProofNet Dataset Pinning (v0.20 Amendment):**
+17. **Gate-1 Input Contract, Unified Adjudicator & Hardened Pool Builder (v0.20 Amendment):**
     - Preserves ratified `representation-lifting-s1-freeze-v0.19` baseline tag as historically immutable.
     - Implemented `tools/extract_proofnet_statement.py`: anchored, fail-closed extraction that strips only trailing proof placeholders (`:= by sorry` / `:= sorry`), eliminates syntax collisions, and hoists imports to the file head. CLI validation mode verifies all 367 entries and their SHA-256 in one pass.
-    - Upgraded `tools/nontriviality_filter.sh` to a tri-state adjudicator ($0 = \text{NONTRIVIAL}$, $1 = \text{TRIVIAL}$, $2 = \text{INPUT\_ERROR / BASELINE\_INVALID}$) with mandatory fail-closed baseline elaboration check using `sorry`.
+    - Unified Gate 1 / Gate 2 into a single authoritative module `tools/nontriviality_filter.py`, eliminating split-brain between the filter script and pool builder. `tools/nontriviality_filter.sh` converted to a thin CLI wrapper.
+    - Upgraded filter contract to a tri-state adjudicator ($0 = \text{NONTRIVIAL}$, $1 = \text{TRIVIAL}$, $2 = \text{INPUT\_ERROR / BASELINE\_INVALID}$) with mandatory fail-closed baseline elaboration check using `sorry`.
     - Eliminates false-negative parse-failure vulnerability, ensuring syntax errors fail closed as input errors rather than passing as nontrivial.
+    - Reconciled Gate-2 specification from "verbatim compilation" to exact "canonical statement elaboration under Lean 4.34.0", enumerating the 5 mechanical transformations: extract statement, strip trailing placeholder, hoist imports, prepend `import Mathlib` if absent, and append `:= by sorry` under `maxHeartbeats 200000`.
     - Authoritative ProofNet commit pinned: `160414332dc196583f6c37c310b420d2a3b07c58` (repo `https://github.com/marcusm117/ProofNet-Verified.git`, `data/proofnet-verified.jsonl` SHA-256 `381f4a06548a4ff6d9b923633c94a97b9c70f41033e13023aae31e1161b7f142`).
     - Unambiguous `case_id` format locked: `proofnet-{index:03d}` (from `proofnet-001` through `proofnet-367`), resolving source name collision on `Rudin_exercise_4_8a` (present at indices 168 and 351). `tools/analyze.py::parse_pool_tsv()` enforces global fail-closed rejection of duplicate `case_id`s.
     - Verified by `tests/test_nontriviality_filter.py` with 16 comprehensive tests, including a **non-skippable** 367/367 entry kill-test asserting exact canonical JSONL SHA-256, unique case IDs, and zero leaked `sorry`. Missing dataset triggers an immediate hard test failure.
-    - Implemented frozen pre-randomness pool orchestrator `tools/build_pool.py` and regression test suite `tests/test_build_pool.py`. Enforces machine-asserted partition invariant $367 = N_{\text{POOL}} + N_{\text{TRIVIAL}} + N_{\text{TOOLCHAIN}} + N_{\text{INPUT}} + N_{\text{HANG}}$, deterministic `maxHeartbeats 200000`, 60s watchdog timeout (`INFRA_HANG`), and cryptographic bundle commitment `pool_bundle_manifest.json` with 100% byte-identical reproducibility across runs.
-    - `MANIFEST.sha256` updated to cover all 112 payload files with 0 failures on `sha256sum -c`.
+    - Implemented frozen pre-randomness pool orchestrator `tools/build_pool.py` and regression test suite `tests/test_build_pool.py`. Enforces deterministic `maxHeartbeats 200000`, 600s watchdog timeout, fail-closed suppression of `POOL.tsv` if $N_{\text{INFRA\_HANG}} > 0$, machine-asserted partition invariant $367 = N_{\text{POOL}} + N_{\text{TRIVIAL}} + N_{\text{TOOLCHAIN}} + N_{\text{INPUT}}$, and cryptographic bundle commitment `pool_bundle_manifest.json` with 100% byte-identical reproducibility across runs.
+    - External public timestamp anchor rules formalized: the anchor must record the SHA-256 of the **entire `pool_bundle_manifest.json` file**, cryptographically binding source metadata, builder code, and all output file hashes.
+    - Added unmocked real Lean integration test in `tests/test_build_pool.py` verifying real `lake env lean` execution on CI runner across major categories (`rfl`, `ring`, non-trivial, broken syntax).
+    - `MANIFEST.sha256` updated to cover all 113 payload files with 0 failures on `sha256sum -c`.
 
 
 

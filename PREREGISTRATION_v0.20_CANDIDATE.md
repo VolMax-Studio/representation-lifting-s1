@@ -41,7 +41,7 @@ The study consists of three strictly separated arms:
 ├─────────────────────────────────┤        ├─────────────────────────────────┤        ├─────────────────────────────────┤
 │ • Fibonacci (Cassini + Additive)│        │ • ProofNet-Verified (367 base)  │        │ • Sum of odd numbers = n²       │
 │ • Pell (Fund. unit + Product)   │        │ • Mechanical nontriviality      │        │ • Frozen Gnomon Stub            │
-│ • Roots of Unity (Geom sum + Re)│        │ • Verbatim compile on 4.34      │        │ • Symmetric outcome matrix      │
+│ • Roots of Unity (Geom sum + Re)│        │ • Canonical elaboration on 4.34 │        │ • Symmetric outcome matrix      │
 │ Evaluates: Symmetric marginal   │        │ • drand quicknet (N=3 cases)    │        │ • Falsifies metric bias         │
 │            amortization (T1, T2)│        │ Evaluates: Discovery & Step 1   │        │ Evaluates: Scoring integrity    │
 └─────────────────────────────────┘        └─────────────────────────────────┘        └─────────────────────────────────┘
@@ -84,11 +84,25 @@ Evaluates whether Role S can discover a valid representation stub on three theor
   - Canonical JSONL File: `data/proofnet-verified.jsonl`
   - Canonical JSONL SHA-256: `381f4a06548a4ff6d9b923633c94a97b9c70f41033e13023aae31e1161b7f142` (367 records)
   - Canonical `case_id` Format: `proofnet-{index:03d}` (from `proofnet-001` through `proofnet-367`), derived directly from the unique 1-based JSONL `index` field. Resolves duplicate source name collision (`Rudin_exercise_4_8a` present at index 168 and index 351).
-- **Mechanical Exclusion Criteria:**
+- **Mechanical Exclusion Criteria & Canonical Transformations:**
   1. `tools/extract_proofnet_statement.py`: Anchored, fail-closed extraction from ProofNet-Verified JSONL, stripping trailing proof placeholders (`:=\s*(?:by\s*)?sorry\s*$`).
-  2. `tools/nontriviality_filter.sh`: Tri-state fail-closed test against 4 basic tactics under `maxHeartbeats 200000` (`rfl`, `decide`, `linarith`, `ring`). Mandatory baseline elaboration check with `sorry` enforces fail-closed rejection of syntax/parse errors ($2 = \text{INPUT\_ERROR / BASELINE\_INVALID}$). Excludes tactic trivialities ($1 = \text{TRIVIAL}$).
-  3. Pinned Toolchain Compatibility: Verbatim elaboration check under Lean 4 v4.34.0.
+  2. `tools/nontriviality_filter.py` (authoritative Python module and wrapper `tools/nontriviality_filter.sh`): Tri-state fail-closed test against 4 basic tactics under deterministic `maxHeartbeats 200000` (`rfl`, `decide`, `linarith`, `ring`). Mandatory baseline elaboration check with `sorry` enforces fail-closed rejection of syntax/parse errors ($2 = \text{INPUT\_ERROR / BASELINE\_INVALID}$). Excludes tactic trivialities ($1 = \text{TRIVIAL}$).
+  3. Pinned Toolchain Compatibility — Canonical Statement Elaboration under Lean 4 v4.34.0:
+     Rather than compiling verbatim unnormalized JSONL snippets, each candidate undergoes exact, mechanical canonical elaboration:
+     a. Extract canonical statement from JSONL record (`formal_stmt`, `header`, `helper`).
+     b. Remove trailing proof placeholder (`:= by sorry` or `:= sorry`).
+     c. Hoist all `import` declarations to the file header.
+     d. Prepend `import Mathlib` if absent.
+     e. Append `:= by sorry` (for Gate-2 baseline elaboration) or `:= by <tactic>` (for Gate-1 tactic probes) under `set_option maxHeartbeats 200000`.
+     Any candidate failing baseline elaboration is assigned to `EXCLUDED_TOOLCHAIN_INCOMPATIBLE.tsv` with compiler error diagnostics.
 - **Candidate Pool Frozen Artifact:** `POOL.tsv` (sorted lexicographically by unique `case_id`; column 1 is `case_id`, column 2 is `source_name`). Produced deterministically by `tools/build_pool.py` together with exclusion TSVs, `pool_build_report.json`, and cryptographic bundle commitment `pool_bundle_manifest.json`. `tools/analyze.py::parse_pool_tsv()` enforces global fail-closed rejection of duplicate `case_id`s.
+- **Machine-Independent Pool Construction & Fail-Closed Hang Rule:**
+  Watchdog timeout is set to 600s strictly to catch hanging processes without truncating normal Mathlib elaboration.
+  If any case triggers a watchdog timeout ($N_{\text{INFRA\_HANG}} > 0$), `tools/build_pool.py` strictly fails closed: `POOL.tsv` is NOT emitted, and execution aborts with exit code 2.
+  A valid candidate pool exists ONLY when $N_{\text{INFRA\_HANG}} = 0$, guaranteeing that pool composition is 100% deterministic and determined exclusively by Lean 4 heartbeats (`maxHeartbeats 200000`), completely independent of host machine performance. The valid partition equation is:
+  $$367 = N_{\text{POOL}} + N_{\text{TRIVIAL}} + N_{\text{TOOLCHAIN\_INCOMPATIBLE}} + N_{\text{INPUT\_ERROR}}$$
+- **External Timestamp Anchor Rule:**
+  The external public timestamp anchor (Rekor, RFC 3161, OpenTimestamps recorded in `pool_anchor_receipt.json`) must anchor the SHA-256 digest of the **entire `pool_bundle_manifest.json` file**, rather than merely the internal `bundle_sha256` map. This cryptographically binds the builder script metadata and hash, source repository and commit metadata, and all output file hashes under the immutable timestamp proof.
 - **Deterministic Rejection-Sampling Formula (`tools/select_indices.py`):**  
   To eliminate modulo bias and guarantee uniform selection over pool size $N = |P|$, indices are sampled via domain-separated SHA-256 with rejection sampling:
   $$H_j = \operatorname{SHA256}(\texttt{"representation-lifting-s1/v0.1\textbackslash0"} \parallel R \parallel \operatorname{uint64be}(j))$$
@@ -510,7 +524,7 @@ $$\boxed{\text{Trusted Computing Base (TCB)}}$$
 
 - [x] **Gate 0:** Repository initialized with checked-in Lake project, standalone compiled adjudicator (`.lake/build/bin/verifier`), symmetric kernel replay (`addDecl`), branch non-persistence isolation, frozen experimental drivers (`run_calibration_family`, `run_blind_case`, `run_control_case`), deterministic analysis adjudicator (`tools/analyze.py`), full selection custody replay (`validate_selection`), External Anchor Contract schemas (`pool_anchor_receipt.json`, `beacon_verification_receipt.json`), and multi-relay archived drand root (`external_roots/drand_quicknet_info_{api,relay2,cloudflare}.raw.json` with companion `.meta.json`).
 - [ ] **Gate 1:** Mechanical nontriviality script executed on ProofNet-Verified (367 base items).
-- [ ] **Gate 2:** Verbatim Lean 4 v4.34.0 compilation filter executed; `EXCLUDED_TOOLCHAIN_INCOMPATIBLE.tsv` generated.
+- [ ] **Gate 2:** Canonical statement elaboration under Lean 4 v4.34.0 executed; `EXCLUDED_TOOLCHAIN_INCOMPATIBLE.tsv` generated.
 - [ ] **Gate 3:** `POOL.tsv` compiled, sorted, canonical SHA-256 published; `pool_commitment.json` and external timestamp proof recorded in `pool_anchor_receipt.json`.
 - [ ] **Gate 4:** Target drand round committed via `tools/drand_schedule.py`, retrieved, and verified via `beacon_verification_receipt.json`.
 - [ ] **Gate 5:** Live API Smoke Test executed (`tools/smoke_test_executor.py`).
@@ -608,11 +622,26 @@ $$\boxed{\text{Trusted Computing Base (TCB)}}$$
     - Canonical JSONL SHA-256: `381f4a06548a4ff6d9b923633c94a97b9c70f41033e13023aae31e1161b7f142` (367 records)
   - **Case ID Collision Resolution (`proofnet-{index:03d}`):** The ProofNet dataset has 367 entries and 367 unique `index` values, but only 366 unique `name` strings (`Rudin_exercise_4_8a` appears twice: at index 168 and index 351, with distinct mathematical statements). To eliminate collision risk before selection, canonical `case_id` is defined as `proofnet-{index:03d}` (from `proofnet-001` through `proofnet-367`), with `source_name` preserved as column 2 in `POOL.tsv`.
   - **Global Fail-Closed Duplicate Check (`tools/analyze.py`):** `parse_pool_tsv()` parses row-by-row and strictly raises `InputContractError` if any duplicate `case_id` is detected.
-  - **Tri-State Nontriviality Filter Contract (`tools/nontriviality_filter.sh`):**
-    - `0`: `NONTRIVIAL` (baseline elaboration with `sorry` passes; all 4 tactics `rfl`, `decide`, `linarith`, `ring` fail to prove statement under 200,000 heartbeats).
-    - `1`: `TRIVIAL` (proved by at least one tactic).
-    - `2`: `INPUT_ERROR / BASELINE_INVALID` (baseline elaboration with `sorry` fails; syntax error; unstripped `sorry`; or missing file). Exit code 2 halts the case and emits an explicit exclusion record; it is never treated as a tactic failure.
-  - **Adversarial Regression Test Suite (`tests/test_nontriviality_filter.py`):** Added 16 comprehensive tests covering all 4 tactics, non-trivial statements, adversarial syntax errors, unstripped `sorry` rejection, and a **non-skippable** 367-entry kill-test that asserts exact canonical JSONL SHA-256, unique case IDs, and zero leaked `sorry`. Missing dataset triggers an immediate hard failure (no `skipTest`).
-  - **Deterministic Pool Builder Orchestrator (`tools/build_pool.py`):** Implemented mechanical builder enforcing Gate 2 baseline compilation under Lean 4 v4.34.0 (`maxHeartbeats 200000`), Gate 1 tactic probing, wall-clock watchdog safety (60s -> `INFRA_HANG`), deterministic machine-asserted partition invariant ($367 = N_{\text{POOL}} + N_{\text{TRIVIAL}} + N_{\text{TOOLCHAIN}} + N_{\text{INPUT}} + N_{\text{HANG}}$), and bundle commitment manifest (`pool_bundle_manifest.json`) without wall-clock timestamps for 100% byte-identical reproducibility. Tested on synthetic fixtures via `tests/test_build_pool.py`.
-  - **Manifest Coverage Expansion:** `MANIFEST.sha256` expands to 112 payload files (+`PREREGISTRATION_v0.20_CANDIDATE.md`, +`tools/extract_proofnet_statement.py`, +`tests/test_nontriviality_filter.py`, +`tools/build_pool.py`, +`tests/test_build_pool.py`), strictly preserving set equality $\operatorname{set}(\text{manifest}) \equiv \operatorname{set}(\text{packaged}) \setminus \{\text{MANIFEST.sha256}\}$ with 0 failures on `sha256sum -c`.
+  - **Unified Authoritative Gate-1 / Gate-2 Module (`tools/nontriviality_filter.py`):**
+    - Eliminated split-brain implementation between shell filter and pool builder. `tools/nontriviality_filter.py` provides the single authoritative implementation of `evaluate_statement()` and `default_lean_runner()`, directly imported and executed by `tools/build_pool.py`.
+    - `tools/nontriviality_filter.sh` converted to a thin CLI wrapper executing `python3 tools/nontriviality_filter.py "$@"`.
+    - Tri-state fail-closed contract: `0 = NONTRIVIAL`, `1 = TRIVIAL`, `2 = INPUT_ERROR / BASELINE_INVALID`.
+  - **Canonical Statement Elaboration under Lean 4 v4.34.0 (Gate 2):**
+    Reconciled wording from "verbatim compilation" to exact "canonical statement elaboration under Lean 4.34.0", enumerating the 5 mechanical transformations:
+    1. Extract canonical statement from JSONL (`formal_stmt`, `header`, `helper`).
+    2. Strip anchored trailing proof placeholder (`:= by sorry` or `:= sorry`).
+    3. Hoist all `import` declarations to the file header.
+    4. Prepend `import Mathlib` if absent.
+    5. Append `:= by sorry` (baseline) or `:= by <tactic>` under deterministic `set_option maxHeartbeats 200000`.
+  - **Machine-Independent Pool Construction & Fail-Closed Hang Rule (`tools/build_pool.py`):**
+    - Watchdog timeout raised to 600s to avoid false hangs during normal Mathlib loading.
+    - If any case experiences a watchdog timeout ($N_{\text{INFRA\_HANG}} > 0$), `tools/build_pool.py` strictly fails closed: `POOL.tsv` is NOT emitted, and execution aborts with exit code 2.
+    - A valid candidate pool exists ONLY when $N_{\text{INFRA\_HANG}} = 0$, guaranteeing that pool composition is 100% deterministic and determined exclusively by Lean 4 heartbeats (`maxHeartbeats 200000`), completely independent of host machine performance.
+    - Valid partition equation: $367 = N_{\text{POOL}} + N_{\text{TRIVIAL}} + N_{\text{TOOLCHAIN\_INCOMPATIBLE}} + N_{\text{INPUT\_ERROR}}$.
+  - **Whole-Manifest Cryptographic Timestamp Anchor Rule:**
+    The external public timestamp anchor (Rekor, RFC 3161, OpenTimestamps) records the SHA-256 of the **entire `pool_bundle_manifest.json` file**, rather than merely the internal `bundle_sha256` map. This cryptographically binds builder script metadata and hash, source repository and commit metadata, and all output file hashes under the immutable timestamp proof.
+  - **Adversarial & Real Lean Integration Test Suites (`tests/test_nontriviality_filter.py`, `tests/test_build_pool.py`):**
+    - `test_nontriviality_filter.py`: 16 comprehensive tests including non-skippable 367 kill-test and tactic fail-closed tests.
+    - `test_build_pool.py`: Added unmocked integration test executing real `lake env lean` against synthetic cases (`rfl` -> TRIVIAL, `ring` -> TRIVIAL, non-trivial -> POOL, syntax error -> TOOLCHAIN_INCOMPATIBLE), asserting zero hangs and valid partition invariant on CI runner.
+  - **Manifest Coverage Expansion:** `MANIFEST.sha256` expands to 113 payload files (+`PREREGISTRATION_v0.20_CANDIDATE.md`, +`tools/extract_proofnet_statement.py`, +`tests/test_nontriviality_filter.py`, +`tools/nontriviality_filter.py`, +`tools/build_pool.py`, +`tests/test_build_pool.py`), strictly preserving set equality $\operatorname{set}(\text{manifest}) \equiv \operatorname{set}(\text{packaged}) \setminus \{\text{MANIFEST.sha256}\}$ with 0 failures on `sha256sum -c`.
   - **Zero Protocol Drift:** No changes made to Lean verification kernel, H1/H2 hypothesis rules, selection custody, drand parameters, executor state machines, models, control matrix, or analysis adjudicator.

@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""
+r"""
 tests/test_build_pool.py
 Regression and deterministic verification test suite for tools/build_pool.py.
 Verifies:
-  1. Synthetic fixture partitioning across all 5 buckets (POOL, TRIVIAL, TOOLCHAIN, INPUT_ERROR, INFRA_HANG).
-  2. Machine-asserted partition invariant N_total = sum(buckets).
+  1. Synthetic partition logic and fail-closed INFRA_HANG suppression of POOL.tsv.
+  2. Machine-asserted partition invariant N_total = N_pool + N_trivial + N_toolchain + N_input.
   3. Duplicate index and duplicate case_id fail-closed handling.
   4. Byte-identical reproducibility across two consecutive runs.
-  5. Deterministic bundle commitment manifest calculation.
-  6. Pinned canonical dataset hash verification.
+  5. Whole-manifest cryptographic commitment anchoring.
+  6. REAL LEAN integration test on synthetic cases (rfl, ring, nontrivial, broken syntax)
+     without mocking, executed directly via lake env lean.
 Part of representation-lifting-s1 experimental protocol (v0.20).
 """
 
@@ -40,10 +41,50 @@ class TestBuildPool(unittest.TestCase):
                 f.write(json.dumps(e) + "\n")
         return fpath
 
+    def test_infra_hang_fails_closed_and_suppresses_pool_tsv(self):
+        """
+        Asserts that if any INFRA_HANG occurs, build_pool strictly fails closed:
+        raises RuntimeError, writes diagnostic INFRA_HANG.tsv, and DOES NOT emit POOL.tsv.
+        This guarantees machine-independent pool construction.
+        """
+        entries = [
+            {"index": 1, "name": "Thm_Good", "header": "", "helper": "", "formal_stmt": "theorem t1 : True := by sorry"},
+            {"index": 2, "name": "Thm_Hang", "header": "", "helper": "", "formal_stmt": "theorem t2 : True := by sorry"}
+        ]
+        jsonl_path = self.create_fixture_jsonl(entries)
+
+        def mock_hanging_runner(code: str, root: str, timeout: int) -> tuple[int, str, str, bool]:
+            if "t2" in code:
+                return -1, "", "Timeout expired", True
+            return 0, "", "", False
+
+        out_dir = os.path.join(self.tmp_dir.name, "out_hang")
+        with self.assertRaises(RuntimeError) as ctx:
+            build_pool.build_pool(
+                jsonl_path=jsonl_path,
+                out_dir=out_dir,
+                assert_pinned=False,
+                lean_runner=mock_hanging_runner
+            )
+
+        self.assertIn("FAIL-CLOSED", str(ctx.exception))
+        self.assertIn("timed out under watchdog", str(ctx.exception))
+
+        # Crucial: POOL.tsv MUST NOT exist!
+        pool_tsv = os.path.join(out_dir, "POOL.tsv")
+        self.assertFalse(os.path.exists(pool_tsv), "POOL.tsv must not be emitted when INFRA_HANG > 0")
+
+        # INFRA_HANG.tsv must be written for diagnosis
+        hang_tsv = os.path.join(out_dir, "INFRA_HANG.tsv")
+        self.assertTrue(os.path.isfile(hang_tsv), "INFRA_HANG.tsv must be emitted for diagnosis")
+        with open(hang_tsv) as f:
+            content = f.read()
+        self.assertIn("proofnet-002", content)
+
     def test_synthetic_partition_with_mock_runner(self):
         """
-        Tests that all 5 mutually exclusive categories are accurately partitioned
-        and the partition invariant is strictly verified.
+        Tests that when N_INFRA_HANG == 0, all 4 valid categories are accurately partitioned
+        and the partition invariant N_total = N_pool + N_trivial + N_toolchain + N_input holds.
         """
         entries = [
             # 1. Non-trivial statement -> POOL
@@ -78,17 +119,9 @@ class TestBuildPool(unittest.TestCase):
                 "helper": "",
                 "formal_stmt": "theorem thm_bad : True := by have h : True := by sorry; sorry"
             },
-            # 5. Infrastructure hang simulation -> INFRA_HANG
+            # 5. Deterministic heartbeat timeout -> EXCLUDED_TOOLCHAIN_INCOMPATIBLE
             {
                 "index": 5,
-                "name": "Thm_Hanging",
-                "header": "",
-                "helper": "",
-                "formal_stmt": "theorem thm_hang : True := by sorry"
-            },
-            # 6. Deterministic heartbeat timeout -> EXCLUDED_TOOLCHAIN_INCOMPATIBLE
-            {
-                "index": 6,
                 "name": "Thm_Heartbeat_Timeout",
                 "header": "",
                 "helper": "",
@@ -97,10 +130,7 @@ class TestBuildPool(unittest.TestCase):
         ]
         jsonl_path = self.create_fixture_jsonl(entries)
 
-        # Mock Lean runner to simulate Lean responses deterministically
         def mock_runner(code: str, root: str, timeout: int) -> tuple[int, str, str, bool]:
-            if "thm_hang" in code:
-                return -1, "", "Timeout expired", True
             if "thm_hb" in code:
                 return 1, "", "(deterministic) timeout at `maxHeartbeats`", False
             if "thm_broken" in code:
@@ -111,7 +141,6 @@ class TestBuildPool(unittest.TestCase):
                 if "sorry" in code:
                     return 0, "", "", False  # baseline compiles
                 return 1, "", "tactic failed", False  # all tactics fail
-            # Default for other cases
             if "sorry" in code:
                 return 0, "", "", False
             return 1, "", "tactic failed", False
@@ -129,13 +158,13 @@ class TestBuildPool(unittest.TestCase):
         self.assertEqual(rep["excluded_trivial"], 1)
         self.assertEqual(rep["excluded_toolchain_incompatible"], 2)  # broken syntax + heartbeat timeout
         self.assertEqual(rep["input_error"], 1)  # multiple sorry
-        self.assertEqual(rep["infra_hang"], 1)   # hang simulation
+        self.assertEqual(rep["infra_hang"], 0)
         self.assertTrue(result["report"]["partition_invariant_satisfied"])
-        self.assertEqual(result["report"]["total_source_entries"], 6)
+        self.assertEqual(result["report"]["total_source_entries"], 5)
 
         # Verify generated files exist
         for fname in ["POOL.tsv", "EXCLUDED_TRIVIAL.tsv", "EXCLUDED_TOOLCHAIN_INCOMPATIBLE.tsv",
-                      "INPUT_ERROR.tsv", "INFRA_HANG.tsv", "pool_build_report.json", "pool_bundle_manifest.json"]:
+                      "INPUT_ERROR.tsv", "pool_build_report.json", "pool_bundle_manifest.json"]:
             fpath = os.path.join(out_dir, fname)
             self.assertTrue(os.path.isfile(fpath), f"Missing generated file: {fname}")
 
@@ -143,6 +172,11 @@ class TestBuildPool(unittest.TestCase):
         with open(os.path.join(out_dir, "POOL.tsv")) as f:
             lines = f.read().splitlines()
         self.assertEqual(lines, ["case_id\tsource_name", "proofnet-001\tThm_Nontrivial"])
+
+        # Check whole-manifest hash computation
+        manifest_path = os.path.join(out_dir, "pool_bundle_manifest.json")
+        computed_manifest_sha = build_pool.compute_file_sha256(manifest_path)
+        self.assertEqual(result["manifest_whole_sha"], computed_manifest_sha)
 
     def test_byte_identical_reproducibility_across_consecutive_runs(self):
         """
@@ -175,11 +209,12 @@ class TestBuildPool(unittest.TestCase):
 
         # Assert commitment hashes match exactly
         self.assertEqual(res1["bundle_commitment_sha"], res2["bundle_commitment_sha"])
+        self.assertEqual(res1["manifest_whole_sha"], res2["manifest_whole_sha"])
 
         # Check byte-for-byte identity of all generated files
         files_to_check = [
             "POOL.tsv", "EXCLUDED_TRIVIAL.tsv", "EXCLUDED_TOOLCHAIN_INCOMPATIBLE.tsv",
-            "INPUT_ERROR.tsv", "INFRA_HANG.tsv", "pool_build_report.json", "pool_bundle_manifest.json"
+            "INPUT_ERROR.tsv", "pool_build_report.json", "pool_bundle_manifest.json"
         ]
         for fname in files_to_check:
             with open(os.path.join(out1, fname), "rb") as f1, open(os.path.join(out2, fname), "rb") as f2:
@@ -218,6 +253,92 @@ class TestBuildPool(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             build_pool.build_pool(jsonl_path, out_dir, assert_pinned=True)
         self.assertIn("Source dataset SHA-256 mismatch", str(ctx.exception))
+
+    def test_real_lean_integration_fixture(self):
+        """
+        REAL LEAN INTEGRATION TEST:
+        Executes build_pool with the real default_lean_runner (lake env lean)
+        across 4 synthetic cases covering all major outcomes:
+          - Case 1: non-trivial statement -> POOL
+          - Case 2: rfl triviality        -> EXCLUDED_TRIVIAL
+          - Case 3: ring triviality       -> EXCLUDED_TRIVIAL
+          - Case 4: broken syntax         -> EXCLUDED_TOOLCHAIN_INCOMPATIBLE
+        Asserts zero INFRA_HANG and valid partition sum on CI runner.
+        """
+        entries = [
+            # 1. Non-trivial Fermat-like statement -> POOL
+            {
+                "index": 1,
+                "name": "Synthetic_Nontrivial",
+                "header": "",
+                "helper": "",
+                "formal_stmt": "theorem syn_nontrivial (n : ℕ) (h : n > 2) (x y z : ℕ) (hx : x > 0) (hy : y > 0) (hz : z > 0) : x^n + y^n ≠ z^n := by sorry"
+            },
+            # 2. Trivial statement solved by rfl -> EXCLUDED_TRIVIAL
+            {
+                "index": 2,
+                "name": "Synthetic_Trivial_Rfl",
+                "header": "",
+                "helper": "",
+                "formal_stmt": "theorem syn_rfl : 1 = 1 := by sorry"
+            },
+            # 3. Trivial statement solved by ring -> EXCLUDED_TRIVIAL
+            {
+                "index": 3,
+                "name": "Synthetic_Trivial_Ring",
+                "header": "",
+                "helper": "",
+                "formal_stmt": "theorem syn_ring (x y : ℤ) : (x + y)^2 = x^2 + 2*x*y + y^2 := by sorry"
+            },
+            # 4. Broken syntax statement -> EXCLUDED_TOOLCHAIN_INCOMPATIBLE
+            {
+                "index": 4,
+                "name": "Synthetic_Broken_Syntax",
+                "header": "",
+                "helper": "",
+                "formal_stmt": "theorem syn_broken : 1 + + = 2 := by sorry"
+            }
+        ]
+        jsonl_path = self.create_fixture_jsonl(entries)
+        out_dir = os.path.join(self.tmp_dir.name, "out_real_lean")
+
+        # Runs with default_lean_runner (real Lean execution)
+        result = build_pool.build_pool(
+            jsonl_path=jsonl_path,
+            out_dir=out_dir,
+            assert_pinned=False
+        )
+
+        rep = result["report"]["partition_counts"]
+        self.assertEqual(rep["pool"], 1, f"Expected 1 POOL case, got {rep['pool']}")
+        self.assertEqual(rep["excluded_trivial"], 2, f"Expected 2 TRIVIAL cases, got {rep['excluded_trivial']}")
+        self.assertEqual(rep["excluded_toolchain_incompatible"], 1, f"Expected 1 TOOLCHAIN case, got {rep['excluded_toolchain_incompatible']}")
+        self.assertEqual(rep["input_error"], 0, f"Expected 0 INPUT_ERROR cases, got {rep['input_error']}")
+        self.assertEqual(rep["infra_hang"], 0, f"Expected 0 INFRA_HANG cases, got {rep['infra_hang']}")
+        self.assertTrue(result["report"]["partition_invariant_satisfied"])
+
+        # Check POOL.tsv
+        with open(os.path.join(out_dir, "POOL.tsv")) as f:
+            pool_content = f.read()
+        self.assertIn("proofnet-001\tSynthetic_Nontrivial", pool_content)
+        self.assertNotIn("proofnet-002", pool_content)
+
+        # Check EXCLUDED_TRIVIAL.tsv
+        with open(os.path.join(out_dir, "EXCLUDED_TRIVIAL.tsv")) as f:
+            trivial_content = f.read()
+        self.assertIn("proofnet-002\tSynthetic_Trivial_Rfl\tsolved_by_rfl", trivial_content)
+        self.assertIn("proofnet-003\tSynthetic_Trivial_Ring", trivial_content)
+        self.assertTrue("solved_by_ring" in trivial_content or "solved_by_linarith" in trivial_content)
+
+        # Check EXCLUDED_TOOLCHAIN_INCOMPATIBLE.tsv
+        with open(os.path.join(out_dir, "EXCLUDED_TOOLCHAIN_INCOMPATIBLE.tsv")) as f:
+            toolchain_content = f.read()
+        self.assertIn("proofnet-004\tSynthetic_Broken_Syntax", toolchain_content)
+
+        # Check whole-manifest hash
+        manifest_path = os.path.join(out_dir, "pool_bundle_manifest.json")
+        computed_manifest_sha = build_pool.compute_file_sha256(manifest_path)
+        self.assertEqual(result["manifest_whole_sha"], computed_manifest_sha)
 
 if __name__ == "__main__":
     unittest.main()

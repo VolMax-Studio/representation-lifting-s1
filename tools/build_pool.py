@@ -8,17 +8,20 @@ Orchestrates mechanical filtration of ProofNet-Verified corpus:
   1. Verifies pinned repository commit and JSONL SHA-256.
   2. Asserts exact 367 entries and unique case_id generation (proofnet-001 .. proofnet-367).
   3. Canonical extraction via tools/extract_proofnet_statement.py (anchored placeholder stripping).
-  4. Gate 2 Baseline Toolchain Compilation Filter:
-     - Verified under Lean 4 v4.34.0 with deterministic limit: set_option maxHeartbeats 200000.
-     - Lean compilation failure (elaboration error, syntax error, deterministic timeout) -> EXCLUDED_TOOLCHAIN_INCOMPATIBLE.
-     - Wall-clock watchdog (> 60s) -> INFRA_HANG (separate operational failure bucket).
+  4. Gate 2 Canonical Statement Elaboration Filter:
+     - Canonical transformations: extract statement, hoist imports, prepend 'import Mathlib',
+       append ':= by sorry', elaborate under deterministic 'set_option maxHeartbeats 200000'.
+     - Elaboration failure (syntax error, type mismatch, heartbeat timeout) -> EXCLUDED_TOOLCHAIN_INCOMPATIBLE.
+     - Wall-clock watchdog (> 600s) -> INFRA_HANG (operational failure abort; prevents machine-dependent pool).
   5. Gate 1 Nontriviality Filter:
      - Probes 4 basic tactics under 200,000 heartbeats (rfl, decide, linarith, ring).
      - Proved by any tactic -> EXCLUDED_TRIVIAL.
-  6. Surviving cases -> POOL.tsv.
-  7. Deterministic machine assertion of partition equation:
-     N_total = N_pool + N_trivial + N_toolchain + N_input + N_infra.
+  6. Surviving cases -> POOL.tsv (emitted ONLY if N_INFRA_HANG == 0).
+  7. Strict fail-closed machine assertion of partition equation:
+     N_total = N_pool + N_trivial + N_toolchain + N_input (strictly requiring N_hang == 0).
   8. Emits bundle commitment manifest (pool_bundle_manifest.json) anchoring all output hashes.
+     The external timestamp anchor (Rekor/RFC3161/OpenTimestamps) must anchor the SHA-256 of the
+     ENTIRE pool_bundle_manifest.json file itself, anchoring source metadata, builder hash, and outputs.
 
 NOTE: Deterministic outputs contain NO wall-clock timestamps to guarantee byte-identical
 reproducibility across independent runs.
@@ -26,12 +29,9 @@ reproducibility across independent runs.
 
 import sys
 import os
-import re
 import json
 import hashlib
 import argparse
-import subprocess
-import tempfile
 from typing import Callable, Any
 
 # Root paths
@@ -49,11 +49,17 @@ from extract_proofnet_statement import (
     PROOFNET_TOTAL_ENTRIES,
 )
 
+from nontriviality_filter import (
+    evaluate_statement,
+    default_lean_runner,
+    MAX_HEARTBEATS,
+    WATCHDOG_TIMEOUT_SECONDS,
+    BASIC_TACTICS,
+    summarize_lean_error,
+)
+
 BUILDER_NAME = "tools/build_pool.py"
 BUILDER_VERSION = "v0.20"
-MAX_HEARTBEATS = 200000
-WATCHDOG_TIMEOUT_SECONDS = 60
-BASIC_TACTICS = ("rfl", "decide", "linarith", "ring")
 
 def compute_file_sha256(filepath: str) -> str:
     """Computes hex SHA-256 digest of a file on disk."""
@@ -62,117 +68,6 @@ def compute_file_sha256(filepath: str) -> str:
         while chunk := f.read(65536):
             hasher.update(chunk)
     return hasher.hexdigest()
-
-def summarize_lean_error(stderr_text: str) -> str:
-    """Extracts first meaningful error line from Lean stderr output."""
-    lines = [line.strip() for line in stderr_text.splitlines() if line.strip()]
-    for line in lines:
-        if "error:" in line or "timeout" in line or "unknown identifier" in line:
-            # Strip local path prefixes for determinism
-            cleaned = re.sub(r"^[^:]+:\d+:\d+:\s*", "", line)
-            return cleaned[:160]
-    return lines[0][:160] if lines else "unknown_elaboration_error"
-
-def default_lean_runner(
-    code: str,
-    project_root: str,
-    watchdog_seconds: int = WATCHDOG_TIMEOUT_SECONDS
-) -> tuple[int, str, str, bool]:
-    """
-    Executes a Lean snippet via `lake env lean` in a temporary file.
-    Returns: (returncode, stdout, stderr, is_watchdog_timeout)
-    """
-    with tempfile.NamedTemporaryFile("w", suffix=".lean", delete=False) as f:
-        f.write(code)
-        temp_lean = f.name
-
-    try:
-        proc = subprocess.run(
-            ["lake", "env", "lean", temp_lean],
-            cwd=project_root,
-            capture_output=True,
-            text=True,
-            timeout=watchdog_seconds
-        )
-        return proc.returncode, proc.stdout, proc.stderr, False
-    except subprocess.TimeoutExpired as exc:
-        stdout = exc.stdout or ""
-        stderr = exc.stderr or ""
-        if isinstance(stdout, bytes):
-            stdout = stdout.decode("utf-8", errors="replace")
-        if isinstance(stderr, bytes):
-            stderr = stderr.decode("utf-8", errors="replace")
-        return -1, stdout, stderr, True
-    finally:
-        if os.path.exists(temp_lean):
-            try:
-                os.remove(temp_lean)
-            except OSError:
-                pass
-
-def evaluate_statement(
-    stripped_decl: str,
-    project_root: str = PROJECT_ROOT,
-    max_heartbeats: int = MAX_HEARTBEATS,
-    watchdog_seconds: int = WATCHDOG_TIMEOUT_SECONDS,
-    lean_runner: Callable[[str, str, int], tuple[int, str, str, bool]] = default_lean_runner
-) -> tuple[str, str]:
-    """
-    Evaluates an extracted canonical declaration snippet through Gate 2 & Gate 1.
-    Returns: (status, reason)
-      status in {"POOL", "EXCLUDED_TRIVIAL", "EXCLUDED_TOOLCHAIN_INCOMPATIBLE", "INFRA_HANG"}
-    """
-    # Hoist imports to top and build wrapped declaration
-    import_lines = []
-    decl_lines = []
-    for line in stripped_decl.splitlines():
-        if re.match(r"^\s*import\b", line):
-            cleaned = re.sub(r"^\s*", "", line).strip()
-            if cleaned not in import_lines:
-                import_lines.append(cleaned)
-        else:
-            decl_lines.append(line)
-
-    if "import Mathlib" not in import_lines:
-        import_lines.insert(0, "import Mathlib")
-
-    imports_header = "\n".join(import_lines)
-    decl_body = "\n".join(decl_lines).strip()
-
-    def build_test_file(proof_tactic: str) -> str:
-        return (
-            f"{imports_header}\n\n"
-            f"set_option maxHeartbeats {max_heartbeats}\n\n"
-            f"{decl_body} := by\n"
-            f"  {proof_tactic}\n"
-        )
-
-    # 1. Gate 2: Baseline Elaboration Check with sorry
-    baseline_code = build_test_file("sorry")
-    rc, stdout, stderr, is_hang = lean_runner(baseline_code, project_root, watchdog_seconds)
-
-    if is_hang:
-        return "INFRA_HANG", f"watchdog_timeout_on_baseline (>{watchdog_seconds}s)"
-
-    if rc != 0:
-        if "(deterministic) timeout" in stderr or "(deterministic) timeout" in stdout:
-            return "EXCLUDED_TOOLCHAIN_INCOMPATIBLE", "deterministic_heartbeat_timeout_on_baseline"
-        err_msg = summarize_lean_error(stderr)
-        return "EXCLUDED_TOOLCHAIN_INCOMPATIBLE", f"baseline_elaboration_failed: {err_msg}"
-
-    # 2. Gate 1: Probe Basic Tactics
-    for tac in BASIC_TACTICS:
-        tac_code = build_test_file(tac)
-        rc, stdout, stderr, is_hang = lean_runner(tac_code, project_root, watchdog_seconds)
-
-        if is_hang:
-            return "INFRA_HANG", f"watchdog_timeout_on_{tac} (>{watchdog_seconds}s)"
-
-        if rc == 0:
-            return "EXCLUDED_TRIVIAL", f"solved_by_{tac}"
-
-    # Passed baseline elaboration and all 4 basic tactics failed
-    return "POOL", "passed_all_tactics"
 
 def build_pool(
     jsonl_path: str,
@@ -184,6 +79,7 @@ def build_pool(
     """
     Executes deterministic pool construction and emits all categorized TSVs,
     partition report, and bundle commitment manifest.
+    Fails closed if any INFRA_HANG occurs, ensuring the pool is 100% machine-independent.
     """
     if not os.path.isfile(jsonl_path):
         raise FileNotFoundError(f"Source JSONL dataset not found at {jsonl_path}")
@@ -249,7 +145,7 @@ def build_pool(
             input_error_cases.append((cid, source_name, f"extraction_exception: {type(err).__name__}: {str(err)}"))
             continue
 
-        # Step 2: Gate 2 and Gate 1 evaluation
+        # Step 2: Gate 2 and Gate 1 evaluation via authoritative module
         status, reason = evaluate_statement(
             decl,
             project_root=project_root,
@@ -269,7 +165,6 @@ def build_pool(
         else:
             input_error_cases.append((cid, source_name, f"unrecognized_status: {status} ({reason})"))
 
-    # Machine-assert exact partition invariant
     total_evaluated = len(entries)
     n_pool = len(pool_cases)
     n_trivial = len(trivial_cases)
@@ -277,12 +172,28 @@ def build_pool(
     n_input = len(input_error_cases)
     n_hang = len(infra_hang_cases)
 
-    partition_sum = n_pool + n_trivial + n_toolchain + n_input + n_hang
+    # CRITICAL FAIL-CLOSED RULE: If N_INFRA_HANG > 0, POOL.tsv MUST NOT be emitted!
+    # A valid pool is produced ONLY when N_INFRA_HANG == 0, guaranteeing machine-independence.
+    if n_hang > 0:
+        os.makedirs(out_dir, exist_ok=True)
+        hang_tsv_path = os.path.join(out_dir, "INFRA_HANG.tsv")
+        with open(hang_tsv_path, "w", encoding="utf-8") as f:
+            f.write("case_id\tsource_name\treason\n")
+            for cid, sname, rsn in sorted(infra_hang_cases, key=lambda x: x[0]):
+                f.write(f"{cid}\t{sname}\t{rsn}\n")
+        raise RuntimeError(
+            f"FAIL-CLOSED: {n_hang} cases timed out under watchdog (> {WATCHDOG_TIMEOUT_SECONDS}s). "
+            f"POOL.tsv generation ABORTED to preserve strict machine-independent pool construction. "
+            f"Details logged to {hang_tsv_path}."
+        )
+
+    # Machine-assert exact partition invariant when N_INFRA_HANG == 0
+    partition_sum = n_pool + n_trivial + n_toolchain + n_input
     if partition_sum != total_evaluated:
         raise AssertionError(
             f"CRITICAL: Partition equation violation! "
-            f"Total evaluated ({total_evaluated}) != Sum of buckets ({partition_sum}) "
-            f"[pool={n_pool}, trivial={n_trivial}, toolchain={n_toolchain}, input={n_input}, hang={n_hang}]"
+            f"Total evaluated ({total_evaluated}) != Sum of valid buckets ({partition_sum}) "
+            f"[pool={n_pool}, trivial={n_trivial}, toolchain={n_toolchain}, input={n_input}]"
         )
 
     # Sort all buckets lexicographically by case_id for deterministic byte output
@@ -290,7 +201,6 @@ def build_pool(
     trivial_cases.sort(key=lambda x: x[0])
     toolchain_cases.sort(key=lambda x: x[0])
     input_error_cases.sort(key=lambda x: x[0])
-    infra_hang_cases.sort(key=lambda x: x[0])
 
     os.makedirs(out_dir, exist_ok=True)
 
@@ -322,13 +232,6 @@ def build_pool(
         for cid, sname, rsn in input_error_cases:
             f.write(f"{cid}\t{sname}\t{rsn}\n")
 
-    # Write INFRA_HANG.tsv
-    hang_tsv_path = os.path.join(out_dir, "INFRA_HANG.tsv")
-    with open(hang_tsv_path, "w", encoding="utf-8") as f:
-        f.write("case_id\tsource_name\treason\n")
-        for cid, sname, rsn in infra_hang_cases:
-            f.write(f"{cid}\t{sname}\t{rsn}\n")
-
     # Generate deterministic pool_build_report.json (NO timestamps)
     report_dict = {
         "schema_version": "representation-lifting-pool-build-report/v1",
@@ -344,9 +247,9 @@ def build_pool(
             "excluded_trivial": n_trivial,
             "excluded_toolchain_incompatible": n_toolchain,
             "input_error": n_input,
-            "infra_hang": n_hang
+            "infra_hang": 0
         },
-        "partition_equation": "total_source_entries == pool + excluded_trivial + excluded_toolchain_incompatible + input_error + infra_hang",
+        "partition_equation": "total_source_entries == pool + excluded_trivial + excluded_toolchain_incompatible + input_error",
         "partition_invariant_satisfied": True
     }
     report_path = os.path.join(out_dir, "pool_build_report.json")
@@ -354,9 +257,11 @@ def build_pool(
         json.dump(report_dict, f, indent=2, sort_keys=True)
         f.write("\n")
 
-    # Compute SHA-256 of builder script itself
+    # Compute SHA-256 of builder and filter scripts
     builder_script_path = os.path.abspath(__file__)
     builder_sha = compute_file_sha256(builder_script_path)
+    filter_script_path = os.path.join(SCRIPT_DIR, "nontriviality_filter.py")
+    filter_sha = compute_file_sha256(filter_script_path)
 
     # Compute SHA-256 of all generated bundle files
     bundle_files_hashes = {
@@ -364,11 +269,10 @@ def build_pool(
         "EXCLUDED_TRIVIAL.tsv": compute_file_sha256(trivial_tsv_path),
         "EXCLUDED_TOOLCHAIN_INCOMPATIBLE.tsv": compute_file_sha256(toolchain_tsv_path),
         "INPUT_ERROR.tsv": compute_file_sha256(input_tsv_path),
-        "INFRA_HANG.tsv": compute_file_sha256(hang_tsv_path),
         "pool_build_report.json": compute_file_sha256(report_path),
     }
 
-    # Deterministic bundle commitment hash
+    # Deterministic bundle commitment hash (over output files)
     canonical_bundle_bytes = json.dumps(bundle_files_hashes, sort_keys=True).encode("utf-8")
     bundle_commitment_sha = hashlib.sha256(canonical_bundle_bytes).hexdigest()
 
@@ -376,21 +280,27 @@ def build_pool(
         "schema_version": "representation-lifting-pool-bundle-manifest/v1",
         "builder_name": BUILDER_NAME,
         "builder_sha256": builder_sha,
+        "filter_name": "tools/nontriviality_filter.py",
+        "filter_sha256": filter_sha,
         "source_repository": PROOFNET_CANONICAL_REPO,
         "source_commit": PROOFNET_CANONICAL_COMMIT if assert_pinned else "fixture",
         "source_jsonl_sha256": source_sha,
         "bundle_files": bundle_files_hashes,
-        "bundle_sha256": bundle_commitment_sha
+        "bundle_sha256": bundle_commitment_sha,
+        "anchor_rule": "The external timestamp anchor (Rekor/RFC3161/OpenTimestamps) must anchor the SHA-256 of this entire pool_bundle_manifest.json file, cryptographically binding source metadata, builder code, and all output hashes."
     }
     bundle_manifest_path = os.path.join(out_dir, "pool_bundle_manifest.json")
     with open(bundle_manifest_path, "w", encoding="utf-8") as f:
         json.dump(bundle_manifest_dict, f, indent=2, sort_keys=True)
         f.write("\n")
 
+    manifest_whole_sha = compute_file_sha256(bundle_manifest_path)
+
     return {
         "report": report_dict,
         "bundle_manifest": bundle_manifest_dict,
-        "bundle_commitment_sha": bundle_commitment_sha
+        "bundle_commitment_sha": bundle_commitment_sha,
+        "manifest_whole_sha": manifest_whole_sha
     }
 
 def main():
@@ -451,7 +361,8 @@ def main():
     print(f"  INFRA_HANG (watchdog timeout):   {rep['infra_hang']}")
     print(f"  Partition Invariant Satisfied:   {res['report']['partition_invariant_satisfied']}")
     print(f"--------------------------------------------------------------------------------")
-    print(f"BUNDLE COMMITMENT SHA-256:         {res['bundle_commitment_sha']}")
+    print(f"INTERNAL BUNDLE SHA-256:           {res['bundle_commitment_sha']}")
+    print(f"WHOLE MANIFEST SHA-256 (ANCHOR):   {res['manifest_whole_sha']}")
     print(f"================================================================================")
     sys.exit(0)
 
