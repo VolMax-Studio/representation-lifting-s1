@@ -17,17 +17,17 @@ jobs:
       - name: Checkout target commit
         uses: actions/checkout@v4
         with:
-          ref: 7bc916627c5cadffdc470da9b0fb74fbcf824e44
+          ref: f3c897813aeb69c6f2df2a73a6966fc29b71e161
 
       - name: Assert exact target commit
         run: |
           set -euo pipefail
           ACTUAL_COMMIT="$(git rev-parse HEAD)"
-          EXPECTED_COMMIT="7bc916627c5cadffdc470da9b0fb74fbcf824e44"
+          EXPECTED_COMMIT="f3c897813aeb69c6f2df2a73a6966fc29b71e161"
           echo "Checked out commit: $ACTUAL_COMMIT"
           echo "Expected commit:   $EXPECTED_COMMIT"
           test "$ACTUAL_COMMIT" = "$EXPECTED_COMMIT"
-          echo "COMMIT VERIFIED: Exactly 7bc916627c5cadffdc470da9b0fb74fbcf824e44"
+          echo "COMMIT VERIFIED: Exactly f3c897813aeb69c6f2df2a73a6966fc29b71e161"
 
       - name: Clone pinned ProofNet-Verified repository
         run: |
@@ -97,15 +97,27 @@ jobs:
           python3 tests/test_analyze.py | tee test_analyze.log
 
           echo "=== 7/8: Running test_nontriviality_filter.py (367 kill-test) ==="
-          python3 -m unittest tests/test_nontriviality_filter.py | tee test_nontriviality_filter.log
+          python3 -m unittest -v tests/test_nontriviality_filter.py | tee test_nontriviality_filter.log
 
           echo "=== 8/8: Running test_build_pool.py (deterministic builder) ==="
-          python3 -m unittest tests/test_build_pool.py | tee test_build_pool.log
+          python3 -m unittest -v tests/test_build_pool.py | tee test_build_pool.log
 
           echo "=== Extra: CLI Dataset Full Validation ==="
           python3 tools/extract_proofnet_statement.py "$PROOFNET_JSONL" | tee extract_proofnet_statement.log
 
           echo "ALL TEST SUITES EXECUTED."
+
+      - name: Dump failed logs on error
+        if: failure()
+        run: |
+          for f in *.log; do
+            if [ -f "$f" ]; then
+              echo "=========================================="
+              echo "=== LOG: $f ==="
+              echo "=========================================="
+              cat "$f"
+            fi
+          done
 
       - name: Parse test logs and generate execution receipt
         run: |
