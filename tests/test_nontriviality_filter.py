@@ -27,7 +27,8 @@ sys.path.insert(0, TOOLS_DIR)
 from extract_proofnet_statement import extract_canonical_statement, InputContractError
 
 FILTER_SH = os.path.join(TOOLS_DIR, "nontriviality_filter.sh")
-PROOFNET_JSONL = "/home/volmax-studio/volmax-projects/iot2/ARCHIVE_EXTERNAL/ProofNet-Verified/data/proofnet-verified.jsonl"
+DEFAULT_PROOFNET_PATH = os.path.abspath(os.path.join(PROJECT_ROOT, "..", "..", "ARCHIVE_EXTERNAL", "ProofNet-Verified", "data", "proofnet-verified.jsonl"))
+PROOFNET_JSONL = os.environ.get("PROOFNET_JSONL", DEFAULT_PROOFNET_PATH)
 
 class TestGate1InputContract(unittest.TestCase):
 
