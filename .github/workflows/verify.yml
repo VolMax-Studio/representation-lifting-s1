@@ -173,13 +173,13 @@ jobs:
           # test_executor_harness.log
           parse_log("test_executor_harness.log", r"ALL HARNESS STATE MACHINE TESTS PASSED")
           with open("test_executor_harness.log", "r", encoding="utf-8") as f:
-              c4 = len(re.findall(r"test_[a-z0-9_]+: PASS", f.read()))
+              c4 = len([l for l in f.read().splitlines() if l.startswith("test_") and "PASS" in l])
           assert c4 == 8, f"Harness count mismatch: expected 8, got {c4}"
 
           # test_drand_schedule.log
           parse_log("test_drand_schedule.log", r"ALL DRAND SCHEDULE REGRESSION TESTS PASSED")
           with open("test_drand_schedule.log", "r", encoding="utf-8") as f:
-              c5 = len(re.findall(r"test_[a-z0-9_]+: PASS", f.read()))
+              c5 = len([l for l in f.read().splitlines() if l.startswith("test_") and "PASS" in l])
           assert c5 == 6, f"Drand count mismatch: expected 6, got {c5}"
 
           c6 = parse_log("test_analyze.log", r"Ran 38 tests", r"Ran (\d+) tests")
