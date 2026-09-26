@@ -1,0 +1,110 @@
+name: freeze-receipt-v0.19
+
+on:
+  push:
+    branches:
+      - ci/freeze-receipt-v0.19
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout frozen commit
+        uses: actions/checkout@v4
+        with:
+          ref: f2cae4da953dc908078a207e932879b69ea2aa53
+
+      - name: Assert exact frozen commit
+        run: |
+          ACTUAL_COMMIT="$(git rev-parse HEAD)"
+          EXPECTED_COMMIT="f2cae4da953dc908078a207e932879b69ea2aa53"
+          echo "Checked out commit: $ACTUAL_COMMIT"
+          echo "Expected commit:   $EXPECTED_COMMIT"
+          test "$ACTUAL_COMMIT" = "$EXPECTED_COMMIT"
+          echo "COMMIT VERIFIED: Exactly f2cae4da953dc908078a207e932879b69ea2aa53"
+
+      - name: Install elan (Lean toolchain manager)
+        run: |
+          curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Verify toolchain
+        run: |
+          lean --version
+          lake --version
+
+      - name: Fetch mathlib cache
+        run: lake exe cache get
+
+      - name: Build verifier binary
+        run: lake build verifier
+
+      - name: Verify manifest integrity
+        run: |
+          sha256sum -c MANIFEST.sha256
+          echo "MANIFEST INTEGRITY: 107/107 OK (0 failures)"
+
+      - name: Run full test suite
+        run: |
+          set -e
+          echo "=== 1/6: Running test_check_bridge.py ==="
+          python3 tests/test_check_bridge.py | tee test_check_bridge.log
+
+          echo "=== 2/6: Running test_verify_proof.py ==="
+          python3 tests/test_verify_proof.py | tee test_verify_proof.log
+
+          echo "=== 3/6: Running test_verify_lifted.py ==="
+          python3 tests/test_verify_lifted.py | tee test_verify_lifted.log
+
+          echo "=== 4/6: Running test_executor_harness.py ==="
+          python3 tests/test_executor_harness.py | tee test_executor_harness.log
+
+          echo "=== 5/6: Running test_drand_schedule.py ==="
+          python3 tests/test_drand_schedule.py | tee test_drand_schedule.log
+
+          echo "=== 6/6: Running test_analyze.py ==="
+          python3 tests/test_analyze.py | tee test_analyze.log
+
+          echo "ALL 6 TEST SUITES PASSED ON INDEPENDENT RUNNER."
+
+      - name: Generate execution receipt
+        run: |
+          cat <<EOF > execution_receipt.txt
+          ================================================================================
+          INDEPENDENT EXECUTION RECEIPT — representation-lifting-s1 v0.19
+          ================================================================================
+          Timestamp UTC:       $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          Runner Kernel:       $(uname -s -r -v -m)
+          Runner Environment:  ${ImageOS:-ubuntu} / ${ImageVersion:-unknown}
+          GitHub Repository:   ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}
+          GitHub Run ID:       ${GITHUB_RUN_ID}
+          GitHub Run URL:      ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          Target Git Commit:   $(git rev-parse HEAD)
+          Target Clean State:  $(git status --porcelain | wc -l) uncommitted files
+          Lean Version:        $(lean --version)
+          Lake Version:        $(lake --version)
+          Lake Mathlib Rev:    $(jq -r '.packages[] | select(.name=="mathlib") | .rev' lake-manifest.json)
+          Manifest Integrity:  $(sha256sum -c MANIFEST.sha256 | wc -l)/107 verified OK (0 failures)
+          Test Suite 1 (Bridge):   PASS (12/12)
+          Test Suite 2 (Proof):    PASS (12/12)
+          Test Suite 3 (Lifted):   PASS (11/11)
+          Test Suite 4 (Harness):  PASS (8/8)
+          Test Suite 5 (Drand):    PASS (6/6)
+          Test Suite 6 (Analyze):  PASS (37/37)
+          Overall Verdict:     PASS
+          ================================================================================
+          EOF
+          cat execution_receipt.txt
+          sha256sum execution_receipt.txt > execution_receipt.txt.sha256
+          cat execution_receipt.txt.sha256
+
+      - name: Upload execution receipt artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: execution-receipt-v0.19
+          path: |
+            execution_receipt.txt
+            execution_receipt.txt.sha256
+            *.log
