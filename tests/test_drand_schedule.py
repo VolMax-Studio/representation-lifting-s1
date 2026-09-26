@@ -91,8 +91,9 @@ def test_quicknet_constants():
     assert hashlib.sha256(content).hexdigest() == "3e690bc527c8a4e78232bc06b5a3cff057c51c68f51b208a1a21b2abd6d6b194"
     info = json.loads(content.decode("utf-8"))
     
-    from tools.drand_schedule import QUICKNET_CHAIN_HASH, GENESIS_TIME, PERIOD_SECONDS
+    from tools.drand_schedule import QUICKNET_CHAIN_HASH, QUICKNET_GROUP_HASH, GENESIS_TIME, PERIOD_SECONDS
     assert QUICKNET_CHAIN_HASH == info["hash"]
+    assert QUICKNET_GROUP_HASH == info["groupHash"]
     assert GENESIS_TIME == info["genesis_time"]
     assert PERIOD_SECONDS == info["period"]
     # v0.19: verify all fields, including groupHash which caught the v0.18 manual-copy error

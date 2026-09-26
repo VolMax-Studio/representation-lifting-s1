@@ -52,10 +52,10 @@ from typing import Any
 
 try:
     from select_indices import select_indices
-    from drand_schedule import compute_scheduled_round, QUICKNET_CHAIN_HASH
+    from drand_schedule import compute_scheduled_round, QUICKNET_CHAIN_HASH, QUICKNET_GROUP_HASH
 except ImportError:
     from tools.select_indices import select_indices
-    from tools.drand_schedule import compute_scheduled_round, QUICKNET_CHAIN_HASH
+    from tools.drand_schedule import compute_scheduled_round, QUICKNET_CHAIN_HASH, QUICKNET_GROUP_HASH
 
 SCHEMA_VERSION = "representation-lifting-execution-receipt/v1"
 CONFIG_SCHEMA_VERSION = "representation-lifting-executor-config/v1"
@@ -65,6 +65,7 @@ POOL_ANCHOR_SCHEMA_VERSION = "representation-lifting-pool-anchor/v1"
 BEACON_VERIFICATION_SCHEMA_VERSION = "representation-lifting-beacon-verification/v1"
 DRAND_QUICKNET_PUBLIC_KEY_HEX = "83cf0f2896adee7eb8b5f01fcad3912212c437e0073e911fb90022d3e760183c8c4b450b6a0a6c3ac6a5776a2d1064510d1fec758c921cc22b0e17e63aaf4bcb5ed66304de9cf809bd274ca73bab4af5a6e9c76a4bc09e76eae8991ef5ece45a"
 DRAND_QUICKNET_SCHEME_ID = "bls-unchained-g1-rfc9380"
+DRAND_QUICKNET_GROUP_HASH = QUICKNET_GROUP_HASH
 REQUIRED_CALIBRATION_FAMILIES = {"fibonacci", "pell", "roots_of_unity"}
 
 class InputContractError(ValueError):

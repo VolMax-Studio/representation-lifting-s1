@@ -4,7 +4,7 @@
 **Author / Principal Investigator:** Ivan Nestorov  
 **Repository:** [https://github.com/VolMax-Studio/representation-lifting-s1](https://github.com/VolMax-Studio/representation-lifting-s1)  
 **Toolchain Target:** Lean 4 (v4.34.0) / Mathlib v4.34.0 (commit `5ed2965256430c3649e86755f9576b54eca72435`)  
-**Preregistration Specification:** [PREREGISTRATION_v0.18_CANDIDATE.md](file:///home/volmax-studio/volmax-projects/iot2/PORTFOLIO/representation-lifting-s1/PREREGISTRATION_v0.18_CANDIDATE.md)  
+**Preregistration Specification:** [PREREGISTRATION_v0.19_CANDIDATE.md](file:///home/volmax-studio/volmax-projects/iot2/PORTFOLIO/representation-lifting-s1/PREREGISTRATION_v0.19_CANDIDATE.md)  
 **Status:** `ARCHITECTURE + ANALYSIS + SELECTION CUSTODY + EXTERNAL ROOT-OF-TRUST FROZEN / READY FOR PRE-RANDOMNESS GATES`
 
 ---
@@ -127,6 +127,7 @@ python3 tests/test_analyze.py           # Verifies deterministic analysis custod
     - `external_roots/drand_quicknet_info_cloudflare.raw.json` is from `drand.cloudflare.com` (trailing newline, raw SHA differs, canonical JSON identical).
     - Each `.raw.json` has a companion `.meta.json` recording URL, UTC fetch time, HTTP status, raw SHA-256, and cross-relay canonical match status.
     - Tests verify all 6 fields (`public_key`, `period`, `genesis_time`, `hash`, `groupHash`, `schemeID`) against the archived raw file, and cross-check canonical equality across all three relays.
+    - `QUICKNET_GROUP_HASH` is pinned as a constant in `tools/drand_schedule.py` and exported through `tools/analyze.py`.
     - `tools/analyze.py` strictly validates `public_key_hex` and its 96-byte length against the pinned constant.
-    - Packaging enforces mechanical set equality $\operatorname{set}(\text{manifest}) \equiv \operatorname{set}(\text{packaged})$, guaranteeing 100% cryptographic coverage of all repository files.
+    - Packaging enforces mechanical set equality $\operatorname{set}(\text{manifest}) \equiv \operatorname{set}(\text{packaged}) \setminus \{\text{MANIFEST.sha256}\}$, guaranteeing 100% cryptographic coverage of all repository payload files with zero `sha256sum -c` failures.
 

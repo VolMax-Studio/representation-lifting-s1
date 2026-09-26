@@ -8,6 +8,7 @@ Part of the representation-lifting-s1 experimental protocol.
 import sys
 
 QUICKNET_CHAIN_HASH = "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971"
+QUICKNET_GROUP_HASH = "f477d5c89f21a17c863a7f937c6a6d15859414d2be09cd448d4279af331c5d3e"
 GENESIS_TIME = 1692803367  # quicknet genesis timestamp (Unix seconds)
 PERIOD_SECONDS = 3         # quicknet period (3 seconds)
 FUTURE_DELAY_SECONDS = 600 # mandatory safety gap between pool publish and drand round (10 minutes)

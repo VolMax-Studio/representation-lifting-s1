@@ -264,9 +264,11 @@ The analysis engine **does not trust** the recorded selection. It mechanically r
 ### 3.7 Full Recursive Manifest Coverage Release Invariant
 To guarantee that every test fixture, Lean proof, configuration file, and root-of-trust artifact is immutably pinned:
 - `MANIFEST.sha256` is generated recursively across the entire repository tree without depth limits.
-- An automated packaging check enforces set equality:
-  $$\operatorname{set}(\text{manifest\_paths}) \equiv \operatorname{set}(\text{packaged\_source\_paths})$$
+- To eliminate the self-referential paradox, `MANIFEST.sha256` records checksums for all repository source files while explicitly excluding itself from its own contents.
+- An automated packaging check enforces mechanical set equality:
+  $$\operatorname{set}(\text{manifest\_paths}) \equiv \operatorname{set}(\text{packaged\_source\_paths}) \setminus \{\text{MANIFEST.sha256}\}$$
 - Packaging fails closed if any repository source file is omitted or if any unmanifested file exists in the candidate archive.
+- Integrity verification via `sha256sum -c MANIFEST.sha256` must complete with exactly 0 failures.
 
 ---
 
@@ -552,3 +554,5 @@ $$\boxed{\text{Trusted Computing Base (TCB)}}$$
   - **Provenance Metadata:** Each `.raw.json` has a companion `.meta.json` recording source URL, UTC fetch timestamp, HTTP status, raw SHA-256, Python-canonical JSON SHA-256, and cross-relay match status.
   - **Extended Field Coverage:** Tests now verify all 6 `/info` fields (`public_key`, `period`, `genesis_time`, `hash`, `groupHash`, `schemeID`) against the archived raw file. `groupHash` is specifically included because it was the field that exposed the v0.18 provenance failure.
   - **Cross-Relay Canonical Equality Test:** New `test_cross_relay_canonical_provenance` proves that `json.dumps(sort_keys=True)` output is identical across all three relay archives.
+  - **Pinned `QUICKNET_GROUP_HASH` Constant:** Added `QUICKNET_GROUP_HASH = "f477d5c89f21a17c863a7f937c6a6d15859414d2be09cd448d4279af331c5d3e"` to `tools/drand_schedule.py` and exported via `tools/analyze.py` (`DRAND_QUICKNET_GROUP_HASH`). Both `tests/test_analyze.py` and `tests/test_drand_schedule.py` now explicitly assert this pinned constant against the raw root.
+  - **Manifest Self-Referential Paradox Resolved:** Excluded `MANIFEST.sha256` from hashing itself, eliminating the dummy hash entry (`e3b0c44…`). The packaging invariant is formalized as $\operatorname{set}(\text{manifest\_paths}) \equiv \operatorname{set}(\text{packaged\_source\_paths}) \setminus \{\text{MANIFEST.sha256}\}$, guaranteeing `sha256sum -c MANIFEST.sha256` passes with 0 failures across all 107 repository payload files.

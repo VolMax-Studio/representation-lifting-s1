@@ -1137,7 +1137,9 @@ class TestAnalyzeCustody(unittest.TestCase):
         self.assertEqual(data["schemeID"], analyze.DRAND_QUICKNET_SCHEME_ID)
         self.assertEqual(data["public_key"], analyze.DRAND_QUICKNET_PUBLIC_KEY_HEX)
         self.assertEqual(len(bytes.fromhex(data["public_key"])), 96)
-        # groupHash: not used by analyzer, but verified to prove archive authenticity
+        # groupHash: pinned constant proving archive authenticity against drand network
+        self.assertEqual(data["groupHash"], analyze.QUICKNET_GROUP_HASH)
+        self.assertEqual(data["groupHash"], analyze.DRAND_QUICKNET_GROUP_HASH)
         self.assertEqual(data["groupHash"], "f477d5c89f21a17c863a7f937c6a6d15859414d2be09cd448d4279af331c5d3e")
 
 if __name__ == "__main__":
