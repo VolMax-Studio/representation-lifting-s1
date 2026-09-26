@@ -23,11 +23,11 @@ jobs:
         run: |
           set -euo pipefail
           ACTUAL_COMMIT="$(git rev-parse HEAD)"
-          EXPECTED_COMMIT="f3c897813aeb69c6f2df2a73a6966fc29b71e161"
+          EXPECTED_COMMIT="f3c8978b55985c0fc76a71ab3d57ba90917204e1"
           echo "Checked out commit: $ACTUAL_COMMIT"
           echo "Expected commit:   $EXPECTED_COMMIT"
           test "$ACTUAL_COMMIT" = "$EXPECTED_COMMIT"
-          echo "COMMIT VERIFIED: Exactly f3c897813aeb69c6f2df2a73a6966fc29b71e161"
+          echo "COMMIT VERIFIED: Exactly f3c8978b55985c0fc76a71ab3d57ba90917204e1"
 
       - name: Clone pinned ProofNet-Verified repository
         run: |
