@@ -139,6 +139,8 @@ python3 tests/test_nontriviality_filter.py # Verifies Gate 1 input contract, anc
     - Authoritative ProofNet commit pinned: `160414332dc196583f6c37c310b420d2a3b07c58` (repo `https://github.com/marcusm117/ProofNet-Verified.git`, `data/proofnet-verified.jsonl` SHA-256 `381f4a06548a4ff6d9b923633c94a97b9c70f41033e13023aae31e1161b7f142`).
     - Unambiguous `case_id` format locked: `proofnet-{index:03d}` (from `proofnet-001` through `proofnet-367`), resolving source name collision on `Rudin_exercise_4_8a` (present at indices 168 and 351). `tools/analyze.py::parse_pool_tsv()` enforces global fail-closed rejection of duplicate `case_id`s.
     - Verified by `tests/test_nontriviality_filter.py` with 16 comprehensive tests, including a **non-skippable** 367/367 entry kill-test asserting exact canonical JSONL SHA-256, unique case IDs, and zero leaked `sorry`. Missing dataset triggers an immediate hard test failure.
-    - `MANIFEST.sha256` updated to cover all 110 payload files with 0 failures on `sha256sum -c`.
+    - Implemented frozen pre-randomness pool orchestrator `tools/build_pool.py` and regression test suite `tests/test_build_pool.py`. Enforces machine-asserted partition invariant $367 = N_{\text{POOL}} + N_{\text{TRIVIAL}} + N_{\text{TOOLCHAIN}} + N_{\text{INPUT}} + N_{\text{HANG}}$, deterministic `maxHeartbeats 200000`, 60s watchdog timeout (`INFRA_HANG`), and cryptographic bundle commitment `pool_bundle_manifest.json` with 100% byte-identical reproducibility across runs.
+    - `MANIFEST.sha256` updated to cover all 112 payload files with 0 failures on `sha256sum -c`.
+
 
 
