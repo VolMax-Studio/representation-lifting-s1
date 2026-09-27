@@ -4,7 +4,7 @@
 **Author / Principal Investigator:** Ivan Nestorov  
 **Repository:** [https://github.com/VolMax-Studio/representation-lifting-s1](https://github.com/VolMax-Studio/representation-lifting-s1)  
 **Toolchain Target:** Lean 4 (v4.34.0) / Mathlib v4.34.0 (commit `5ed2965256430c3649e86755f9576b54eca72435`)  
-**Preregistration Specification:** [PREREGISTRATION_v0.20_CANDIDATE.md](file:///home/volmax-studio/volmax-projects/iot2/PORTFOLIO/representation-lifting-s1/PREREGISTRATION_v0.20_CANDIDATE.md)  
+**Preregistration Specification:** [PREREGISTRATION_v0.20_CANDIDATE.md](PREREGISTRATION_v0.20_CANDIDATE.md)  
 **Status:** `ARCHITECTURE + ANALYSIS + SELECTION CUSTODY + ROOT-OF-TRUST + GATE-1 INPUT CONTRACT FROZEN / READY FOR PRE-RANDOMNESS GATES`
 
 ---
