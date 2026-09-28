@@ -1,0 +1,9 @@
+case_id	source_name	reason
+proofnet-062	Dummit_Foote_exercise_7_3_37	watchdog_timeout_on_baseline (>600s)
+proofnet-117	Munkres_exercise_22_2b	watchdog_timeout_on_ring (>600s)
+proofnet-118	Munkres_exercise_23_2	watchdog_timeout_on_baseline (>600s)
+proofnet-119	Munkres_exercise_23_4	watchdog_timeout_on_baseline (>600s)
+proofnet-158	Rudin_exercise_3_1a	watchdog_timeout_on_ring (>600s)
+proofnet-159	Rudin_exercise_3_3	watchdog_timeout_on_baseline (>600s)
+proofnet-160	Rudin_exercise_3_6a	watchdog_timeout_on_baseline (>600s)
+proofnet-162	Rudin_exercise_3_20	watchdog_timeout_on_rfl (>600s)

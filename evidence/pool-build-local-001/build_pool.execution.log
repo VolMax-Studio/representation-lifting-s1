@@ -1,0 +1,10 @@
+CRITICAL EXECUTION ERROR: RuntimeError: FAIL-CLOSED: 8 cases timed out under watchdog (> 600s). POOL.tsv generation ABORTED to preserve strict machine-independent pool construction. Details logged to ../representation-lifting-s1-pool-run1/INFRA_HANG.tsv.
+================================================================================
+DETERMINISTIC POOL BUILDER — representation-lifting-s1 (v0.20)
+================================================================================
+Source JSONL:     /home/volmax-studio/volmax-projects/iot2/ARCHIVE_EXTERNAL/ProofNet-Verified/data/proofnet-verified.jsonl
+Output Directory: ../representation-lifting-s1-pool-run1
+Fixture Mode:     False
+Heartbeat Limit:  200000
+Watchdog Timeout: 600s
+--------------------------------------------------------------------------------
