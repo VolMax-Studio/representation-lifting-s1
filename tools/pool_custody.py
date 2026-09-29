@@ -248,10 +248,11 @@ def parse_rekor_entry_evidence(evidence_bytes: bytes, subject_sha256: str, ratif
     proof = ver.get("inclusionProof")
     if not isinstance(proof, dict):
         raise CustodyError("Rekor entry lacks an inclusionProof.")
-    if proof.get("logIndex") != idx:
-        raise CustodyError("inclusionProof.logIndex does not equal the entry logIndex.")
-    if not _is_strict_int(proof.get("treeSize")) or proof["treeSize"] <= idx:
-        raise CustodyError("inclusionProof.treeSize must be an integer greater than logIndex.")
+    proof_idx = proof.get("logIndex")
+    if not _is_strict_int(proof_idx) or proof_idx < 0:
+        raise CustodyError("inclusionProof.logIndex must be a non-negative integer.")
+    if not _is_strict_int(proof.get("treeSize")) or proof["treeSize"] <= proof_idx:
+        raise CustodyError("inclusionProof.treeSize must be greater than inclusionProof.logIndex.")
     if not isinstance(proof.get("rootHash"), str) or not _HEX64.match(proof["rootHash"].lower()):
         raise CustodyError("inclusionProof.rootHash must be a 64-hex SHA-256 value.")
     if not isinstance(proof.get("hashes"), list):

@@ -233,9 +233,33 @@ class TestPoolCustodyV2(unittest.TestCase):
         self.assertRejects(commitment=c, anchor=a, evidence=ev)
 
     def test_inclusion_proof_consistency(self):
-        for po in ({"logIndex": 999}, {"treeSize": 1000}, {"treeSize": 10}, {"rootHash": "zz"}, {"hashes": None}):
+        # {"logIndex": 999} is intentionally absent: proof.logIndex may differ from entry.logIndex
+        # (Rekor v1 sharding; confirmed by Gate-3a real-Rekor fixture).
+        for po in ({"treeSize": 1000}, {"treeSize": 10}, {"rootHash": "zz"}, {"hashes": None}):
             c, a, ev = self._rebind(entry_kw={"proof_overrides": po})
             self.assertRejects(commitment=c, anchor=a, evidence=ev)
+
+    def test_sharded_proof_log_index_accepted(self):
+        """proof.logIndex may differ from the global entry logIndex (Rekor v1 sharding)."""
+        # entry logIndex = 1000; proof logIndex = 500 (different shard position) — must be accepted
+        c, a, ev = self._rebind(entry_kw={"proof_overrides": {"logIndex": 500, "treeSize": 501}})
+        self.assertEqual(self.validate(commitment=c, anchor=a, evidence=ev), T_COMMIT - 3600)
+
+    def test_proof_log_index_negative_rejected(self):
+        for bad_idx in (-1, -999):
+            c, a, ev = self._rebind(entry_kw={"proof_overrides": {"logIndex": bad_idx, "treeSize": 5}})
+            self.assertRejects(commitment=c, anchor=a, evidence=ev)
+
+    def test_proof_tree_size_not_greater_than_proof_log_index_rejected(self):
+        # treeSize must be strictly greater than proof.logIndex (not entry.logIndex)
+        for po in ({"logIndex": 100, "treeSize": 100},   # equal — reject
+                   {"logIndex": 100, "treeSize": 99},    # less — reject
+                   {"logIndex": 100, "treeSize": 101}):  # strictly greater — accept
+            c, a, ev = self._rebind(entry_kw={"proof_overrides": po})
+            if po["treeSize"] > po["logIndex"]:
+                self.assertEqual(self.validate(commitment=c, anchor=a, evidence=ev), T_COMMIT - 3600)
+            else:
+                self.assertRejects(commitment=c, anchor=a, evidence=ev)
 
     def test_no_clock_skew_rejection(self):
         # retrieved_at_unix is informational: a local clock behind Rekor must not fail custody.

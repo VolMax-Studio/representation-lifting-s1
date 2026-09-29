@@ -1,0 +1,8 @@
+representation-lifting-s1 Gate 3a Rekor dry-run
+PURPOSE: dummy subject for Rekor SSH upload/verify/parser validation only
+NOT A POOL ANCHOR
+NOT A STUDY ARTIFACT
+protocol_candidate: representation-lifting-s1/v0.21-r2
+T_COMMIT_UNIX: 1790877600
+ratifier_fingerprint: SHA256:5aVclA4mSj525gNohpxgBArgTo8qWvUbftMsGUs2TLw
+gate_id: gate3a-real-rekor-dryrun-001

@@ -1,0 +1,15 @@
+  ____    _____   _  __   ___    ____             ____   _       ___
+ |  _ \  | ____| | |/ /  / _ \  |  _ \           / ___| | |     |_ _|
+ | |_) | |  _|   | ' /  | | | | | |_) |  _____  | |     | |      | |
+ |  _ <  | |___  | . \  | |_| | |  _ <  |_____| | |___  | |___   | |
+ |_| \_\ |_____| |_|\_\  \___/  |_| \_\          \____| |_____| |___|
+rekor-cli: Rekor CLI
+
+GitVersion:    v1.3.6
+GitCommit:     a6788566cd62facb0fb0450e9d2c2867f551e37c
+GitTreeState:  clean
+BuildDate:     2024-04-02T04:16:36Z
+GoVersion:     go1.21.8
+Compiler:      gc
+Platform:      linux/amd64
+

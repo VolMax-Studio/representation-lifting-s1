@@ -1,0 +1,14 @@
+{
+  "global_log_index": 2998815348,
+  "integrated_time_unix": 1790680786,
+  "proof_log_index": 2876911086,
+  "proof_tree_size": 2876974967,
+  "ratifier_ssh_public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAID0Yhb6zPoq9Kwnlx+pJqZ3UVh8pi7lyiStkajEo1R9m",
+  "raw_rekor_api_response_sha256": "07b14ad53eac2d2763729a7bdd5bf137963c02437d6bc51f17eb8b6ac61a965b",
+  "rekor_cli_sha256": "74e4b3119723ab5bad31166e509be83f3a84549b1f24a0a9fe65b6de22668784",
+  "rekor_cli_version": "v1.3.6",
+  "rekor_upload_exit_code": 0,
+  "rekor_verify_exit_code": 0,
+  "subject_sha256": "67ace68aa7a410283a181375570e09f7b893cd4c1fa5cb813c10f3f28b0bc015",
+  "uuid": "108e9186e8c5677afae2d37cc524aa72aff1071d90c1080ae72225d30b04edd3ba409c6ff9f4c34a"
+}
