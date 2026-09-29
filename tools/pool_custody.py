@@ -68,8 +68,10 @@ FROZEN_FILTER_SHA256 = "de48d2c28a735d0128e49a3a714708bf8fe1cf60cff20a70cff25164
 #   anchor comfortably (hours, not minutes). A missed deadline is NOT_EVALUABLE_POOL_TIMESTAMP.
 # RATIFIER_SSH_PUBLIC_KEY: "<type> <base64-blob>" of the key that signs the v0.21 freeze tag
 #   (no comment). It is compared against Rekor's canonical key (ssh.MarshalAuthorizedKey form).
-T_COMMIT_UNIX: int | None = None
-RATIFIER_SSH_PUBLIC_KEY: str | None = None
+T_COMMIT_UNIX: int | None = 1790877600  # 2026-10-01 18:00:00 UTC; human-ratified by Ivan Nestorov
+RATIFIER_SSH_PUBLIC_KEY: str | None = (
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAID0Yhb6zPoq9Kwnlx+pJqZ3UVh8pi7lyiStkajEo1R9m"
+)  # fingerprint SHA256:5aVclA4mSj525gNohpxgBArgTo8qWvUbftMsGUs2TLw (Ivan Nestorov P10 ratifier)
 # -------------------------------------------------------------------------------------------------
 
 COMMITMENT_V2_KEYS = {"schema_version", "protocol", "freeze_tag_object_id", "manifest_sha256",
