@@ -155,10 +155,11 @@ def validate_selection(
     POOL bytes -> pool SHA-256 -> pool size -> scheduled round -> beacon signature -> R -> indices -> case_ids.
 
     Validates external anchors when provided:
-    - pool_anchor (v0.21): requires the raw pool_bundle_manifest.json bytes and the archived raw
-      Rekor evidence; validates the full chain manifest -> POOL.tsv -> commitment/v2 -> anchor/v2 ->
-      earliest Rekor entry, with published_at_unix == verified_timestamp_unix == T1
-      (tools/pool_custody.validate_pool_custody_v2).
+    - pool_anchor (v0.21 r2): requires the raw pool_bundle_manifest.json bytes and the archived raw
+      Rekor entry response; validates manifest -> POOL.tsv -> commitment/v2 (anchor subject: freeze tag,
+      M, P, N, published_at_unix == frozen T_COMMIT_UNIX) -> ratifier-signed Rekor `rekord` entry ->
+      anchor/v2, and requires the entry integratedTime T1 <= T_COMMIT_UNIX
+      (tools/pool_custody.validate_pool_custody_v2). The round is derived from T_COMMIT_UNIX.
     - beacon_verification: verifies external BLS verification status, chain hash, round, signature, and scheme.
 
     Returns the authoritative list of 3 selected items: [{'index': idx, 'case_id': cid}, ...]
@@ -193,7 +194,7 @@ def validate_selection(
 
     pub_time = pool_commitment.get("published_at_unix")
     if not isinstance(pub_time, int) or isinstance(pub_time, bool) or pub_time <= 0:
-        raise InputContractError("pool_commitment missing valid positive integer 'published_at_unix' timestamp (v0.21: T1).")
+        raise InputContractError("pool_commitment missing valid positive integer 'published_at_unix' timestamp (v0.21: T_COMMIT_UNIX).")
     pub_time_int = pub_time
 
     # v0.21: manifest binding is checked whenever the manifest is supplied; with an anchor it is mandatory.
@@ -219,8 +220,8 @@ def validate_selection(
             )
         except pool_custody.CustodyError as err:
             raise InputContractError(f"Pool custody violation: {err}")
-        if t1 != pub_time_int:
-            raise InputContractError(f"Custody T1 {t1} != published_at_unix {pub_time_int}.")
+        if t1 > pub_time_int:
+            raise InputContractError(f"Custody T1 {t1} is after published_at_unix (T_COMMIT_UNIX) {pub_time_int}.")
 
     # Validate selection_record
     if not isinstance(selection_record, dict):
@@ -313,8 +314,8 @@ def validate_selection(
             f"Selected case_ids mismatch: recomputed case_ids {expected_case_ids} do not match recorded case_ids {rec_case_ids}."
         )
 
-    # External pool anchor receipt (v0.21) is validated above, before the round is derived
-    # from published_at_unix, so the round can only be computed from an anchor-bound T1.
+    # External pool anchor receipt (v0.21 r2) is validated above, before the round is derived
+    # from published_at_unix (= frozen T_COMMIT_UNIX, bound into the anchored subject).
 
     # Validate external beacon verification receipt if provided
     if beacon_verification is not None:

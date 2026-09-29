@@ -478,14 +478,16 @@ class TestAnalyzeCustody(unittest.TestCase):
         indices = select_indices(rand_bytes, pool_size, count=3)
         selected = [{"index": idx, "case_id": f"case_{idx}"} for idx in indices]
         
-        # v0.21 custody: manifest -> Rekor evidence -> derived commitment/v2 + anchor/v2 (T1 = t_pub)
+        # v0.21 r2 custody: freeze T_COMMIT (= t_pub) -> subject/commitment v2 -> one Rekor entry (T1 <= T_COMMIT) -> anchor v2
         pool_manifest, pool_anchor_evidence, pool_commitment, pool_anchor = custody_fixtures.make_valid_custody(
             pool_tsv.encode("utf-8"), pool_size, t_pub)
         self._anchor_extras = {"pool_manifest": pool_manifest, "pool_anchor_evidence": pool_anchor_evidence}
-        patcher = mock.patch.object(pool_custody, "CARRIED_FORWARD_MANIFEST_SHA256",
-                                    hashlib.sha256(pool_manifest).hexdigest())
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for name, value in (("CARRIED_FORWARD_MANIFEST_SHA256", hashlib.sha256(pool_manifest).hexdigest()),
+                            ("T_COMMIT_UNIX", t_pub),
+                            ("RATIFIER_SSH_PUBLIC_KEY", custody_fixtures.RATIFIER_KEY)):
+            patcher = mock.patch.object(pool_custody, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
         selection_record = {
             "schema_version": "representation-lifting-selection/v1",
@@ -740,7 +742,7 @@ class TestAnalyzeCustody(unittest.TestCase):
     def test_adversarial_pool_anchor_timestamp_mismatch(self):
         """Adversarial check: pool_anchor timestamp mismatch against published_at_unix is rejected."""
         pool_tsv, pool_commitment, selection_record, pool_anchor, beacon_verification, _ = self._make_valid_selection_custody()
-        pool_anchor["verified_timestamp_unix"] += 10
+        pool_anchor["integrated_time_unix"] += 10  # v0.21 r2 field name
         with self.assertRaises(analyze.InputContractError):
             analyze.validate_selection(pool_tsv, pool_commitment, selection_record, pool_anchor=pool_anchor, **self._anchor_extras)
 
@@ -1156,12 +1158,12 @@ class TestAnalyzeCustody(unittest.TestCase):
 
     def test_v021_manifest_not_carried_forward_rejected_without_test_pin(self):
         pool_tsv, pool_commitment, selection_record, pool_anchor, beacon_verification, _ = self._make_valid_selection_custody()
-        mock.patch.stopall()  # restore the real pin aef332...; synthetic manifest must now fail
+        mock.patch.stopall()  # restore real pins (aef332..., unset freeze parameters); must now fail closed
         with self.assertRaises(analyze.InputContractError):
             analyze.validate_selection(pool_tsv, pool_commitment, selection_record,
                                        pool_anchor=pool_anchor, **self._anchor_extras)
 
-    def test_v021_round_must_derive_from_anchor_t1(self):
+    def test_v021_round_must_derive_from_frozen_t_commit(self):
         pool_tsv, pool_commitment, selection_record, pool_anchor, beacon_verification, _ = self._make_valid_selection_custody()
         from drand_schedule import compute_scheduled_round
         selection_record["round"] = compute_scheduled_round(pool_commitment["published_at_unix"] + 60)

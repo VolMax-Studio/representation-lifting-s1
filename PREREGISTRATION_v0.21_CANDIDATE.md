@@ -1,7 +1,8 @@
-# representation-lifting-s1: PREREGISTRATION v0.21 CANDIDATE
-**Status:** PRE-RANDOMNESS CUSTODY AMENDMENT CANDIDATE — NOT FROZEN (SUPERSEDES v0.20 `4ca9c0c1…`, v0.19 `d5625988…`, v0.18 `3cbe8d58…`, v0.17 `967e266e…`, v0.16 `b3d37f9e…`, v0.15 `2aa3d9d1…`, v0.14 `114a563f…`, v0.13 `84f36cb3…`, v0.12 `364dec3a…`, v0.11 `66558238…`, v0.10 `cd49146a…`, v0.9 `ee8c2dab…`, v0.8 `6701f8f2…`, v0.7 `4f12eae5…`, v0.6 `ecb31e42…`, v0.5 `64e6cde8…`, v0.4 `bdc5c76e…`, v0.3 `da532b0e…`, v0.2 `4fdc0bf4…`, AND v0.1 `254e06d8…`)  
+# representation-lifting-s1: PREREGISTRATION v0.21 CANDIDATE (r2)
+**Status:** PRE-RANDOMNESS CUSTODY AMENDMENT CANDIDATE r2 — NOT FROZEN (SUPERSEDES v0.20 `4ca9c0c1…`, v0.19 `d5625988…`, v0.18 `3cbe8d58…`, v0.17 `967e266e…`, v0.16 `b3d37f9e…`, v0.15 `2aa3d9d1…`, v0.14 `114a563f…`, v0.13 `84f36cb3…`, v0.12 `364dec3a…`, v0.11 `66558238…`, v0.10 `cd49146a…`, v0.9 `ee8c2dab…`, v0.8 `6701f8f2…`, v0.7 `4f12eae5…`, v0.6 `ecb31e42…`, v0.5 `64e6cde8…`, v0.4 `bdc5c76e…`, v0.3 `da532b0e…`, v0.2 `4fdc0bf4…`, AND v0.1 `254e06d8…`)  
 **Ratified Baseline Tag:** `representation-lifting-s1-freeze-v0.20` (commit `f3c8978b55985c0fc76a71ab3d57ba90917204e1`)  
 **Carried-Forward Candidate Pool:** run2, `pool_bundle_manifest.json` SHA-256 `aef332f69fb7bf70c0032dc05a383f8fea0085fecbd2ba22281c48ef4c36f7f6`, `POOL.tsv` SHA-256 `398ddcb3d9e915edce681c0d59138950177d7eb096200795f927741fb9743212`, $N = 362$  
+**Freeze Parameters (set before the signed tag):** `T_COMMIT_UNIX` = `<TO BE SET>`; ratifier SSH public key = `<TO BE SET>` (both pinned in `tools/pool_custody.py`)  
 **Author / Principal Investigator:** Ivan Nestorov  
 **Target Toolchain:** Lean 4 (v4.34.0) / Mathlib v4.34.0 (commit `5ed2965256430c3649e86755f9576b54eca72435`)  
 **Repository Location:** `PORTFOLIO/representation-lifting-s1/`  
@@ -102,10 +103,8 @@ Evaluates whether Role S can discover a valid representation stub on three theor
   If any case triggers a watchdog timeout ($N_{\text{INFRA\_HANG}} > 0$), `tools/build_pool.py` strictly fails closed: `POOL.tsv` is NOT emitted, and execution aborts with exit code 2.
   A valid candidate pool exists ONLY when $N_{\text{INFRA\_HANG}} = 0$, guaranteeing that pool composition is 100% deterministic and determined exclusively by Lean 4 heartbeats (`maxHeartbeats 200000`), completely independent of host machine performance. The valid partition equation is:
   $$367 = N_{\text{POOL}} + N_{\text{TRIVIAL}} + N_{\text{TOOLCHAIN\_INCOMPATIBLE}} + N_{\text{INPUT\_ERROR}}$$
-- **External Timestamp Anchor Rule (v0.21):**
-  The sole external time authority is the public Rekor transparency log (`https://rekor.sigstore.dev`). The anchored object is $M = \operatorname{SHA256}(\text{entire } \texttt{pool\_bundle\_manifest.json})$. Because the manifest binds the SHA-256 of `POOL.tsv`, the builder and filter hashes, and the pinned source corpus, anchoring $M$ irrevocably fixes the pool. The authoritative pool publication time is
-  $$T_1 := \texttt{integratedTime}\ \text{of the earliest Rekor entry whose artifact hash is } M \text{ (ties: lowest logIndex)},$$
-  regardless of who created that entry. `published_at_unix` is **defined** as $T_1$; it is derived, never chosen. Full contract: §3.5 and §3.8.
+- **External Timestamp Anchor Rule (v0.21 r2):**
+  The anchored object is the **anchor subject** `pool_commitment.json` (v2, canonical bytes), which contains the object id of the signed v0.21 freeze tag, the whole-manifest SHA-256 $M$, the `POOL.tsv` SHA-256, $N$, and `published_at_unix` $:= T_{\text{commit}}$ (`T_COMMIT_UNIX`, fixed in the signed freeze). The ratifier signs the exact subject bytes with the pinned SSH key; that signing event is uploaded to the public Rekor log (`https://rekor.sigstore.dev`) as one `rekord` entry. The anchor is admissible iff that entry's `integratedTime` $T_1 \le T_{\text{commit}}$. The drand round is $r = \operatorname{compute\_scheduled\_round}(T_{\text{commit}})$ — a function of the precommitted time, never of the anchor time. Full contract: §3.5 and §3.8.
 - **Deterministic Rejection-Sampling Formula (`tools/select_indices.py`):**  
   To eliminate modulo bias and guarantee uniform selection over pool size $N = |P|$, indices are sampled via domain-separated SHA-256 with rejection sampling:
   $$H_j = \operatorname{SHA256}(\texttt{"representation-lifting-s1/v0.1\textbackslash0"} \parallel R \parallel \operatorname{uint64be}(j))$$
@@ -203,9 +202,9 @@ If the surviving pool count satisfies $N_{\text{POOL}} < 3$ (or in the extreme $
 
 The complete trust chain bridges the boundary between internal deterministic custody and external public trust anchors:
 
-$$\boxed{ \text{POOL.tsv} \xrightarrow{\text{hash}} \text{manifest } M \xrightarrow{\text{earliest Rekor entry}} T_1 \longrightarrow \text{pool\_commitment (derived)} \xrightarrow{T_1 + 600\,\text{s}} \text{drand round} \xrightarrow{\text{BLS}} \text{selection\_record} \longrightarrow \text{tools/analyze.py} }$$
+$$\boxed{ \text{signed freeze } (F, T_{\text{commit}}) \to \text{subject} (F, M, P, N, T_{\text{commit}}) \xrightarrow{\text{SSH sig}} \text{Rekor entry } (T_1 \le T_{\text{commit}}) \qquad T_{\text{commit}} + 600\,\text{s} \to \text{drand round} \xrightarrow{\text{BLS}} \text{selection\_record} \to \text{tools/analyze.py} }$$
 
-`analyze.py` mechanically verifies the hash bindings, the earliest-entry selection, and $T_1$ equality over the archived raw Rekor API responses. Cryptographic verification of the Rekor Signed Entry Timestamp and inclusion proof is performed externally (`rekor-cli verify`) and recorded in `pool_anchor_receipt.json` (`verifier`); any third party can repeat it from the archived evidence.
+`analyze.py` mechanically verifies every hash binding, the signer key, the entry identity (UUID, logIndex, integratedTime), $T_1 \le T_{\text{commit}}$, and inclusion-proof consistency over the archived raw Rekor API response. Cryptographic verification of the Signed Entry Timestamp, inclusion proof and SSH signature is performed externally (`rekor-cli verify`) and recorded as `verifier`; any third party can repeat it from the archived evidence.
 
 ### 3.4 Archived External Root-of-Trust (Multi-Relay Provenance, v0.19)
 
@@ -234,46 +233,50 @@ The blind arm is governed by five cryptographic artifacts:
    - All passing candidate rows are sorted in ascending lexicographical order by stable source identifier.
    - Canonical data row count defines pool size $N$.
 
-2. **`pool_commitment.json` (Derived Pool Commitment, schema v2):**
-   - Generated **mechanically** by `tools/derive_pool_commitment.py` after the manifest anchor exists. It is a derived custody record, not a pre-authored file, and is **not** itself the object of the external timestamp.
-   - Schema: `representation-lifting-pool-commitment/v2` (exact key set; no additional keys)
+2. **`pool_commitment.json` (Anchor Subject, schema v2):**
+   - Built mechanically **after** the signed v0.21 freeze tag and **before** $T_{\text{commit}}$ by `tools/derive_pool_commitment.py commitment`; stored in canonical form (`json.dumps(indent=2, sort_keys=True)` + LF). It cannot exist before the freeze because it contains the freeze tag object id; any earlier public anchor of the bare manifest hash $M$ is therefore irrelevant.
+   - Schema: `representation-lifting-pool-commitment/v2` (exact key set)
    ```json
    {
      "schema_version": "representation-lifting-pool-commitment/v2",
+     "protocol": "representation-lifting-s1/v0.21",
+     "freeze_tag_object_id": "<40-hex object id of the signed annotated tag representation-lifting-s1-freeze-v0.21>",
      "manifest_sha256": "aef332f69fb7bf70c0032dc05a383f8fea0085fecbd2ba22281c48ef4c36f7f6",
      "pool_sha256": "398ddcb3d9e915edce681c0d59138950177d7eb096200795f927741fb9743212",
      "pool_size": 362,
-     "published_at_unix": "<integer T1>"
+     "published_at_unix": "<T_COMMIT_UNIX>"
    }
    ```
 
-3. **`pool_anchor_receipt.json` (External Pool Timestamp Anchor Receipt, schema v2) and `rekor_evidence.json`:**
-   - `rekor_evidence.json` (schema `representation-lifting-rekor-evidence/v1`, produced by `tools/fetch_rekor_evidence.py`) archives the raw response of `POST /api/v1/index/retrieve {"hash":"sha256:<M>"}` and the raw response of `GET /api/v1/log/entries/{uuid}` for **every** returned UUID.
-   - Schema: `representation-lifting-pool-anchor/v2` (exact key set; no additional keys)
+3. **`pool_anchor_receipt.json` (schema v2) and `rekor_entry_evidence.json`:**
+   - `rekor_entry_evidence.json` (schema `representation-lifting-rekor-entry-evidence/v1`, `tools/fetch_rekor_evidence.py`) archives the raw response of `GET /api/v1/log/entries/{uuid}` for the **one** UUID returned by `rekor-cli upload`. No index search is used anywhere: `POST /api/v1/index/retrieve` is documented by Rekor as experimental, best-effort, possibly incomplete, and deprecated, and carries no normative weight.
+   - Schema: `representation-lifting-pool-anchor/v2` (exact key set)
    ```json
    {
      "schema_version": "representation-lifting-pool-anchor/v2",
      "anchor_type": "rekor",
      "rekor_url": "https://rekor.sigstore.dev",
+     "subject_sha256": "<SHA-256 of canonical pool_commitment.json bytes>",
      "manifest_sha256": "<M>",
-     "pool_sha256": "<SHA-256 of POOL.tsv bytes>",
-     "anchor_proof_id": "<UUID of the earliest Rekor entry for M>",
-     "anchor_log_index": "<its logIndex>",
-     "verified_timestamp_unix": "<its integratedTime = T1>",
-     "anchor_evidence_sha256": "<SHA-256 of rekor_evidence.json bytes>",
+     "pool_sha256": "<P>",
+     "rekor_uuid": "<UUID returned by rekor-cli upload>",
+     "rekor_log_index": "<logIndex>",
+     "integrated_time_unix": "<T1>",
+     "ratifier_ssh_public_key": "<type> <blob>",
+     "anchor_evidence_sha256": "<SHA-256 of rekor_entry_evidence.json bytes>",
      "verifier": "<rekor-cli version and verify invocation>",
      "verification_status": "ANCHOR_VERIFIED"
    }
    ```
-   - **Validation Rule (v0.21):**
-     $$\operatorname{SHA256}(\text{manifest bytes}) = M_{\text{carried-forward}} = \texttt{commitment.manifest\_sha256} = \texttt{anchor.manifest\_sha256}$$
-     $$\texttt{manifest.bundle\_files["POOL.tsv"]} = \operatorname{SHA256}(\text{POOL.tsv bytes}) = \texttt{commitment.pool\_sha256} = \texttt{anchor.pool\_sha256}$$
-     $$\text{canonical POOL row count} = \texttt{commitment.pool\_size}$$
-     $$\texttt{anchor.verified\_timestamp\_unix} = \texttt{commitment.published\_at\_unix} = T_1 \quad (\text{strict equality})$$
-     `anchor_proof_id` and `anchor_log_index` must identify the earliest Rekor entry for $M$ in the archived evidence; every archived entry must record artifact hash $M$ (algorithm `sha256`, kind `rekord` or `hashedrekord`) and carry a `signedEntryTimestamp` and `inclusionProof`; the archived entries must equal the index search result exactly; `anchor_evidence_sha256` must equal the SHA-256 of the evidence bytes; the manifest's `builder_sha256` / `filter_sha256` must equal the frozen v0.20 instrument.
-   - **Admissible anchor type:** `rekor` only. `git_push` (not externally verifiable), RFC 3161 and OpenTimestamps (not publicly searchable for earlier anchors of the same hash; OpenTimestamps time resolution is coarser than the 600 s safety gap) are inadmissible as the normative anchor. They may be archived as supplementary evidence only.
-   - **Retired schemas:** `representation-lifting-pool-commitment/v1` and `representation-lifting-pool-anchor/v1` are rejected with `InputContractError`.
-   - **Fail-Closed Policy:** If blind receipts are evaluated without a valid `pool_anchor_receipt.json`, H2 fails closed as **`NOT_EVALUABLE_POOL_TIMESTAMP`**. A receipt supplied without the manifest bytes and the Rekor evidence bytes raises `InputContractError`.
+   - **Validation Rule (v0.21 r2):**
+     $$\operatorname{SHA256}(\text{manifest}) = M_{\text{carried-forward}} = \texttt{commitment.manifest\_sha256} = \texttt{anchor.manifest\_sha256}$$
+     $$\texttt{manifest.bundle\_files["POOL.tsv"]} = \operatorname{SHA256}(\text{POOL.tsv}) = \texttt{commitment.pool\_sha256} = \texttt{anchor.pool\_sha256}, \quad \text{row count} = \texttt{commitment.pool\_size}$$
+     $$\texttt{commitment.published\_at\_unix} = T_{\text{commit}}, \qquad \operatorname{SHA256}(\text{canonical commitment}) = \texttt{anchor.subject\_sha256} = \text{entry artifact hash}$$
+     $$\text{entry: kind } \texttt{rekord},\ \text{format } \texttt{ssh},\ \text{key} = \text{pinned ratifier key};\quad \text{UUID, logIndex, integratedTime} = \text{receipt};\quad T_1 \le T_{\text{commit}}$$
+     The inclusion proof must be internally consistent (`inclusionProof.logIndex` = entry logIndex, `treeSize` > logIndex, 64-hex `rootHash`) and a `signedEntryTimestamp` must be present. The manifest's `builder_sha256` / `filter_sha256` must equal the frozen v0.20 instrument.
+   - **Admissible anchor:** Rekor `rekord` with SSH signature only (`hashedrekord` does not support SSH keys). `git_push`, RFC 3161 and OpenTimestamps are inadmissible as the normative anchor.
+   - **Retired schemas:** `representation-lifting-pool-commitment/v1`, `representation-lifting-pool-anchor/v1` → `InputContractError`.
+   - **Fail-Closed Policy:** Without a valid `pool_anchor_receipt.json`, H2 is **`NOT_EVALUABLE_POOL_TIMESTAMP`**. An entry with $T_1 > T_{\text{commit}}$, or any binding violation, raises `InputContractError`. A receipt supplied without manifest bytes and evidence bytes raises `InputContractError`.
 
 4. **`beacon_verification_receipt.json` (External drand BLS Authenticity Receipt):**
    - External BLS threshold signature verification receipt generated by an official pinned drand client/verifier against the quicknet public key.
@@ -320,12 +323,12 @@ The analysis engine **does not trust** the recorded selection. It mechanically r
 - Asserts $\texttt{quicknet\_chain\_hash} \equiv \texttt{"52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971"}$.
 - Asserts Quicknet BLS signature length is strictly 48 bytes (G1): $\operatorname{len}(\operatorname{bytes.fromhex}(\texttt{signature\_hex})) == 48$.
 - Asserts $\operatorname{SHA256}(\texttt{signature\_bytes}) \equiv \texttt{randomness\_hex} = R$ (official drand quicknet rule: $\text{rand} := \operatorname{SHA256}(\text{sig})$).
-- Recomputes $r_{\text{scheduled}} = \operatorname{compute\_scheduled\_round}(\texttt{published\_at\_unix})$ and asserts $r_{\text{scheduled}} == \texttt{round}$.
+- Recomputes $r_{\text{scheduled}} = \operatorname{compute\_scheduled\_round}(\texttt{published\_at\_unix})$, where `published_at_unix` $= T_{\text{commit}}$ (v0.21), and asserts $r_{\text{scheduled}} == \texttt{round}$.
 - Recomputes $I = \operatorname{select\_indices}(R, N, \text{count}=3)$ via rejection sampling.
 - For each index $i \in I$, looks up the $i$-th row in $\text{POOL.tsv}$ to derive expected $\texttt{case\_id}$.
 - Asserts that recomputed indices and case IDs match recorded indices and case IDs identically.
 - Asserts zero duplicate indices or case IDs.
-- Validates the v0.21 pool custody chain (`tools/pool_custody.validate_pool_custody_v2`: manifest bytes, POOL bytes, commitment/v2, anchor/v2, archived Rekor evidence, earliest-entry rule, $T_1$ equality) **before** deriving the round from `published_at_unix`, and validates `beacon_verification_receipt.json`.
+- Validates the v0.21 r2 custody chain (`tools/pool_custody.validate_pool_custody_v2`) **before** deriving the round from `published_at_unix` $= T_{\text{commit}}$, and validates `beacon_verification_receipt.json`.
 - Asserts Quicknet public key in receipt is strictly 96 bytes (G2, 192 hex chars) and equals `DRAND_QUICKNET_PUBLIC_KEY_HEX`.
 - Any structural violation, hash mismatch, corrupted signature, tampered index, or invalid external receipt status raises an immediate **`InputContractError`**.
 - If selection custody artifacts are omitted when blind receipts exist, H2 fails closed as **`NOT_EVALUABLE`** (`MISSING_SELECTION_CUSTODY`).
@@ -341,21 +344,23 @@ To guarantee that every test fixture, Lean proof, configuration file, and root-o
 - Packaging fails closed if any repository source file is omitted or if any unmanifested file exists in the candidate archive.
 - Integrity verification via `sha256sum -c MANIFEST.sha256` must complete with exactly 0 failures.
 
-### 3.8 Carried-Forward Pool, Anti-Grinding Rule & Anchoring Procedure (v0.21)
+### 3.8 Carried-Forward Pool, Precommitted Round & Anchoring Procedure (v0.21 r2)
 
-**Carried-forward pool.** The candidate pool is the output of run2 under the frozen v0.20 instrument (`f3c8978`), $367 = 362 + 1 + 4 + 0$, $N_{\text{INFRA\_HANG}} = 0$. Its identifiers are pinned in `tools/pool_custody.py` (`CARRIED_FORWARD_MANIFEST_SHA256`, `CARRIED_FORWARD_POOL_SHA256`, `CARRIED_FORWARD_POOL_SIZE`). v0.21 has no authority to regenerate, rebuild, or replace the pool; any other manifest is rejected. Run1 (ABORTED / INFRA_HANG, `evidence/pool-build-local-001/`) produced no pool.
+**Carried-forward pool.** The candidate pool is the output of run2 under the frozen v0.20 instrument (`f3c8978`), $367 = 362 + 1 + 4 + 0$, $N_{\text{INFRA\_HANG}} = 0$, pinned in `tools/pool_custody.py`. v0.21 has no authority to regenerate, rebuild, or replace it. Run1 (ABORTED / INFRA_HANG, `evidence/pool-build-local-001/`) produced no pool.
 
-**Anti-grinding rule.** The drand round is a deterministic function of $T_1$. If the operator could choose among several anchors of $M$, they could choose among several rounds after observing their randomness. Therefore $T_1$ is the earliest public Rekor entry for $M$, by anyone. Rekor is append-only and searchable by artifact hash, so no earlier anchor can be concealed. Because $M$ is already public (commit `64dd0c6`), a third party may create the first entry; that entry then defines $T_1$ and the study proceeds with it.
+**Precommitted round (anti-grinding).** The only free variable of the blind selection is the drand round. v0.21 fixes it through `T_COMMIT_UNIX`, written into the candidate before independent review and into the signed freeze tag: $r = \operatorname{compute\_scheduled\_round}(T_{\text{commit}})$. The anchor time $T_1$ only has to satisfy $T_1 \le T_{\text{commit}}$; it does not influence $r$. Consequently the decision to anchor is necessarily taken before $r$'s randomness exists, and re-signing, re-tagging, or re-uploading cannot change the selection. (Rationale for rejecting a search-based "earliest anchor" rule: Rekor's hash index is best-effort and cannot prove the absence of an earlier, abandoned anchor.)
 
-**No-abandonment rule.** From the moment any Rekor entry for $M$ exists, the study is committed: the scheduled round is retrieved, the selection is computed and published, and results are reported whatever the selected cases are. Abandoning, re-anchoring, or re-building after an entry exists is a protocol violation and must be reported as such.
+**Deadline and no re-roll.** If no admissible entry with $T_1 \le T_{\text{commit}}$ exists, H2 is `NOT_EVALUABLE_POOL_TIMESTAMP` for s1. There is no re-roll within s1: any later attempt with a new reference time is a new, separately preregistered study, and must report the s1 round $r$ and its selection alongside. Once an admissible entry exists, the selection for $r$ is computed, published and evaluated whatever the selected cases are.
 
-**Procedure (all steps after the signed v0.21 freeze tag):**
-1. Pre-anchor check: `rekor-cli search --rekor_server https://rekor.sigstore.dev --sha aef332f69fb7bf70c0032dc05a383f8fea0085fecbd2ba22281c48ef4c36f7f6`. The result (expected: none) is recorded. If an entry already exists, skip step 2; the earliest existing entry defines $T_1$.
-2. Anchor: sign the manifest bytes (`ssh-keygen -Y sign -n file -f <key> pool_bundle_manifest.json`) and upload (`rekor-cli upload --rekor_server https://rekor.sigstore.dev --artifact pool_bundle_manifest.json --signature pool_bundle_manifest.json.sig --pki-format ssh --public-key <key>.pub`). The signer identity carries no custody weight; only the entry time does.
-3. Verify: `rekor-cli verify` with the same arguments (exit 0). Record the exact `rekor-cli` version and command as `verifier`.
-4. Archive: `python3 tools/fetch_rekor_evidence.py --manifest … --out custody/rekor_evidence.json`.
-5. Derive: `python3 tools/derive_pool_commitment.py … --out-dir custody/`. It prints $T_1$, the scheduled round $r = \operatorname{compute\_scheduled\_round}(T_1)$ and its publication time.
-6. Commit and push `custody/` (manifest copy, `POOL.tsv` copy, signature, evidence, commitment, receipt, `SHA256SUMS`). Pushing before the round publishes is recommended, but carries no custody weight: after step 2 no free parameter remains.
+**Procedure:**
+1. Before freeze: set `T_COMMIT_UNIX` (hours after the planned freeze, not minutes) and `RATIFIER_SSH_PUBLIC_KEY` (the tag-signing key, `<type> <blob>`) in `tools/pool_custody.py`; complete Gate 3a; independent gate; regenerate `MANIFEST.sha256`; sign and push the annotated tag `representation-lifting-s1-freeze-v0.21`.
+2. Subject: `python3 tools/derive_pool_commitment.py commitment --freeze-tag-object-id $(git rev-parse representation-lifting-s1-freeze-v0.21) --manifest … --pool-tsv … --out-dir custody/`.
+3. Sign: `ssh-keygen -Y sign -n file -f <ratifier key> custody/pool_commitment.json`.
+4. Upload: `rekor-cli upload --rekor_server https://rekor.sigstore.dev --artifact custody/pool_commitment.json --signature custody/pool_commitment.json.sig --pki-format ssh --public-key <ratifier key>.pub`. Record the returned UUID. (Must complete before $T_{\text{commit}}$.)
+5. Verify: `rekor-cli verify` with the same arguments (exit 0); record the exact version and command.
+6. Archive: `python3 tools/fetch_rekor_evidence.py --uuid <UUID> --out custody/rekor_entry_evidence.json`.
+7. Receipt: `python3 tools/derive_pool_commitment.py receipt --commitment custody/pool_commitment.json --rekor-evidence custody/rekor_entry_evidence.json --verifier "…" --manifest … --pool-tsv … --out-dir custody/`.
+8. Commit and push `custody/` with `SHA256SUMS`.
 
 ---
 
@@ -497,7 +502,7 @@ All analytical categorizations, inequality evaluations, multi-family aggregation
 Execution Receipts (*.json)      ──┐
 POOL.tsv                         ──┼
 pool_bundle_manifest.json        ──┼
-rekor_evidence.json              ──┼
+rekor_entry_evidence.json        ──┼
 pool_commitment.json (v2)        ──┼──► tools/analyze.py ──► Certified Study Report
 pool_anchor_receipt.json (v2)    ──┤                         ├── study_verdict (PRIMARY ONLY)
 beacon_verification_receipt.json ──┤                         └── replication (SECONDARY ONLY)
@@ -539,7 +544,7 @@ $$\boxed{\text{Trusted Computing Base (TCB)}}$$
 | **Deterministic Analysis Custody (`analyze.py`)** | Trusted | Frozen analysis adjudicator (`tools/analyze.py`). Mechanically computes $O_{\text{completion}}$, conditional $\Delta W$, dual H1 inequalities, conservative aggregation, selection custody replay, and negative control veto checks from raw JSON receipts. Scope is explicitly conditional on externally verified receipts. |
 | **Archived drand External Root-of-Trust (Multi-Relay)** | Pinned Artifact | `external_roots/drand_quicknet_info_api.raw.json` (raw SHA-256 `3e690bc5…6b194`), cross-validated with `api2.drand.sh` and `drand.cloudflare.com`. Each has companion `.meta.json` with provenance. Authoritative source for chain hash, period (3s), genesis (1692803367), scheme ID (`bls-unchained-g1-rfc9380`), group hash (`f477d5c8…5d3e`), and 96-byte G2 public key (`83cf0f28…`). All 6 fields verified by automated regression tests. |
 | **Selection Custody Replay (`validate_selection`)** | Cryptographic Custody | Mechanically reproduces $\text{POOL bytes} \to \text{hash} \to \text{round} \to \text{signature} \to R \to \text{indices} \to \text{cases}$. Asserts Quicknet G1 signature length $\equiv 48$ bytes. |
-| **External Pool Timestamp Anchor (Rekor, v0.21)** | External Trust Anchor | Earliest public Rekor entry for the whole-manifest SHA-256 $M$ defines $T_1$ = `published_at_unix`. Raw API responses archived in `rekor_evidence.json`; bindings and earliest-entry rule checked by `tools/pool_custody.py`; SET/inclusion proof verified externally by `rekor-cli verify`. Missing receipt fails closed as `NOT_EVALUABLE_POOL_TIMESTAMP`; any binding violation raises `InputContractError`. |
+| **External Pool Timestamp Anchor (Rekor, v0.21 r2)** | External Trust Anchor | One ratifier-signed Rekor `rekord` entry for the anchor subject (freeze tag id, $M$, $P$, $N$, $T_{\text{commit}}$) with $T_1 \le T_{\text{commit}}$. Raw entry archived; bindings checked by `tools/pool_custody.py`; SET, inclusion proof and signature verified externally by `rekor-cli verify`. No index search. Missing receipt → `NOT_EVALUABLE_POOL_TIMESTAMP`. |
 | **External Beacon BLS Verifier (`beacon_verification_receipt.json`)** | External Trust Anchor | Official drand client verifying Quicknet BLS threshold signature against pinned 96-byte G2 public key `83cf0f28…`. Missing, unverified, or public key mismatch fails closed as `NOT_EVALUABLE_BEACON_AUTHENTICITY` or `InputContractError`. |
 | **Configuration Root-of-Trust (`executor_config.json`)** | Pinned Constant | Locks model IDs (`claude-sonnet-4-6`, `gpt-5.6-sol`), effort budgets (3h / 30 turns), request timeouts (600s), and transport policies. |
 | **Target & Frozen Spec Generators** | Trusted | Harness scripts generating frozen target statement modules and frozen specification modules. |
@@ -559,12 +564,13 @@ $$\boxed{\text{Trusted Computing Base (TCB)}}$$
 - [x] **Gate 0:** Repository initialized with checked-in Lake project, standalone compiled adjudicator (`.lake/build/bin/verifier`), symmetric kernel replay (`addDecl`), branch non-persistence isolation, frozen experimental drivers (`run_calibration_family`, `run_blind_case`, `run_control_case`), deterministic analysis adjudicator (`tools/analyze.py`), full selection custody replay (`validate_selection`), External Anchor Contract schemas (`pool_anchor_receipt.json`, `beacon_verification_receipt.json`), and multi-relay archived drand root (`external_roots/drand_quicknet_info_{api,relay2,cloudflare}.raw.json` with companion `.meta.json`).
 - [x] **Gate 1:** Mechanical nontriviality evaluation executed on ProofNet-Verified (367 items) — run2, frozen v0.20 builder.
 - [x] **Gate 2:** Canonical statement elaboration under Lean 4 v4.34.0 executed; `EXCLUDED_TOOLCHAIN_INCOMPATIBLE.tsv` generated (4 cases) — run2.
-- [ ] **Gate 3a (v0.21 freeze precondition):** Rekor dry run on a **dummy artifact** (never the pool manifest): upload, verify, fetch evidence, and commit it as `tests/fixtures/rekor_real_entry_dryrun.json`. `tests/test_pool_custody.py::test_real_rekor_dryrun_entry_parses` must run (not skip) and pass.
-- [ ] **Gate 3b:** v0.21 human-ratified signed freeze tag exists; pre-anchor `rekor-cli search` for $M$ recorded.
-- [ ] **Gate 3c:** Manifest anchored in Rekor; `rekor-cli verify` exit 0; `rekor_evidence.json`, `pool_commitment.json` (v2), `pool_anchor_receipt.json` (v2) derived mechanically and committed.
-- [ ] **Gate 4:** Target drand round $r = \operatorname{compute\_scheduled\_round}(T_1)$ retrieved and verified via `beacon_verification_receipt.json`.
+- [ ] **Gate 3a (freeze precondition):** Rekor dry run with the **ratifier key** on a **dummy subject** (never the pool manifest or the real subject): sign, upload, verify, fetch; commit `tests/fixtures/rekor_real_entry_dryrun.json` and `.meta.json`. `test_real_rekor_dryrun_entry_parses` must run (not skip) and pass.
+- [ ] **Gate 3b (freeze precondition):** `T_COMMIT_UNIX` and `RATIFIER_SSH_PUBLIC_KEY` set; `test_freeze_parameters_set_and_well_formed` runs and passes; full test suite 0 failures, 0 skips in custody tests.
+- [ ] **Gate 3c:** Independent gate review of the r2 candidate; signed v0.21 freeze tag pushed.
+- [ ] **Gate 3d:** Subject built, signed, uploaded with $T_1 \le T_{\text{commit}}$; `rekor-cli verify` exit 0; evidence and receipt derived and committed.
+- [ ] **Gate 4:** Round $r = \operatorname{compute\_scheduled\_round}(T_{\text{commit}})$ retrieved and verified via `beacon_verification_receipt.json`.
 - [ ] **Gate 5:** Live API Smoke Test executed (`tools/smoke_test_executor.py`).
-- [ ] **Gate 6:** Human Ratification by Ivan Nestorov (v0.21 freeze tag) prior to the manifest anchor.
+- [ ] **Gate 6:** Human Ratification by Ivan Nestorov: signed v0.21 freeze tag before the subject is built.
 
 ---
 
@@ -681,10 +687,9 @@ $$\boxed{\text{Trusted Computing Base (TCB)}}$$
     - `test_build_pool.py`: Added unmocked integration test executing real `lake env lean` against synthetic cases (`rfl` -> TRIVIAL, `ring` -> TRIVIAL, non-trivial -> POOL, syntax error -> TOOLCHAIN_INCOMPATIBLE), asserting zero hangs and valid partition invariant on CI runner.
   - **Manifest Coverage Expansion:** `MANIFEST.sha256` expands to 113 payload files (+`PREREGISTRATION_v0.20_CANDIDATE.md`, +`tools/extract_proofnet_statement.py`, +`tests/test_nontriviality_filter.py`, +`tools/nontriviality_filter.py`, +`tools/build_pool.py`, +`tests/test_build_pool.py`), strictly preserving set equality $\operatorname{set}(\text{manifest}) \equiv \operatorname{set}(\text{packaged}) \setminus \{\text{MANIFEST.sha256}\}$ with 0 failures on `sha256sum -c`.
   - **Zero Protocol Drift:** No changes made to Lean verification kernel, H1/H2 hypothesis rules, selection custody, drand parameters, executor state machines, models, control matrix, or analysis adjudicator.
-- **Amendment 0.20 $\to$ 0.21 (Current / Pre-Randomness Custody Amendment):**
-  - **Trigger:** Pre-anchor review after run2 found that the frozen v0.20 preregistration (§3.5: anchor must bind `commitment_sha256`; `verified_timestamp_unix <= published_at_unix`; whole-manifest anchor) and the frozen `tools/analyze.py` (strict `==`; no `commitment_sha256` or manifest check; no generator for `pool_commitment.json`) were mutually unsatisfiable with a truthful external timestamp. Recorded in `evidence/PRE_RANDOMNESS_CUSTODY_BLOCKER_v0.20.md` (commit `64dd0c6`) and its erratum, **before** any anchor, drand round, or selection.
-  - **Timestamp semantics:** `published_at_unix` is defined as $T_1$, the integratedTime of the earliest Rekor entry for the whole-manifest SHA-256. Strict equality is retained and is now satisfiable by construction. `pool_commitment.json` is derived after the anchor and is not itself timestamped; `commitment_sha256` is removed from the anchor contract.
-  - **Anti-grinding:** earliest-entry rule (§3.8) and no-abandonment rule; normative anchor restricted to Rekor.
-  - **Code:** new `tools/pool_custody.py` (v2 schemas, Rekor evidence parser, chain validator, carried-forward pins), `tools/fetch_rekor_evidence.py`, `tools/derive_pool_commitment.py`; `tools/analyze.py::validate_selection` requires manifest and evidence bytes with an anchor and validates the chain before deriving the round; v1 custody schemas retired; `published_at_unix` must be an integer.
-  - **Tests:** new `tests/test_pool_custody.py` (valid chain, every binding mutation, timestamp mismatch, inadmissible anchor types, evidence tampering, anti-grinding, v0.20 circular fixture regression, frozen builder/filter byte identity, freeze-gate real Rekor fixture); `tests/test_analyze.py` custody fixture migrated to v2 with analyzer-boundary tests.
+- **Amendment 0.20 $\to$ 0.21 (Current / Pre-Randomness Custody Amendment, candidate r2):**
+  - **Trigger:** The frozen v0.20 preregistration (§3.5: bind `commitment_sha256`; `verified_timestamp_unix <= published_at_unix`) and frozen `tools/analyze.py` (strict `==`; no `commitment_sha256` or manifest check; no commitment generator) were mutually unsatisfiable with a truthful external timestamp. Recorded before any anchor, round or selection in `evidence/PRE_RANDOMNESS_CUSTODY_BLOCKER_v0.20.md` (`64dd0c6`) and its erratum.
+  - **r1 → r2 (gate finding, before any Rekor write):** r1 defined $T_1$ as the earliest Rekor entry for the bare manifest hash, found via `POST /api/v1/index/retrieve`. Rekor documents that endpoint as experimental, best-effort, possibly incomplete, and deprecated, so absence of an earlier anchor was not provable; and since $M$ was already public, a pre-existing anchor could have tied the study to a round published before ratification. r2 removes all index search, anchors a subject that contains the freeze tag object id, binds the entry to the pinned ratifier key and to the exact uploaded UUID, and derives the round from the precommitted `T_COMMIT_UNIX` instead of the anchor time. `ALLOWED_REKOR_KINDS` narrowed to `rekord`; clock-skew check removed; inclusion-proof consistency checks added.
+  - **Code:** `tools/pool_custody.py` (v2 schemas, subject builder, single-entry evidence parser, chain validator, carried-forward and freeze pins), `tools/fetch_rekor_evidence.py` (single GET by UUID), `tools/derive_pool_commitment.py` (`commitment` / `receipt` steps); `tools/analyze.py::validate_selection` requires manifest and evidence bytes with an anchor, validates the chain before deriving the round, enforces $T_1 \le$ `published_at_unix`; v1 custody schemas retired; integer `published_at_unix`.
+  - **Tests:** `tests/test_pool_custody.py` (valid chain; every binding mutation; deadline; signer key; kind/format; receipt identity; inclusion-proof consistency; no-skew; retired index-search evidence; v0.20 circular fixture; frozen builder/filter byte identity; two freeze-gate tests); `tests/test_analyze.py` custody fixture migrated to v2 with analyzer-boundary tests.
   - **Zero Protocol Drift:** No change to the ProofNet corpus or pin, Gate-1/Gate-2 semantics, `tools/build_pool.py`, `tools/nontriviality_filter.py`, the carried-forward 362-case pool, drand parameters, `tools/select_indices.py`, `tools/drand_schedule.py`, H0/H1/H2, scoring, model bindings, executor state machines, or verdict semantics.

@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
 tests/custody_fixtures.py
-Synthetic v0.21 custody artifacts (manifest, raw Rekor API evidence, commitment/v2, anchor/v2).
+Synthetic v0.21 (r2) custody artifacts: manifest, anchor subject (pool_commitment/v2),
+raw Rekor `rekord` entry response for an SSH signing event, anchor receipt/v2.
 
-Rekor entry objects mirror the public Rekor v1 API shape
-(GET /api/v1/log/entries/{uuid} -> {uuid: {body, integratedTime, logID, logIndex, verification}}).
-A captured REAL Rekor response is additionally required as a freeze-gate fixture
-(tests/fixtures/rekor_real_entry_dryrun.json, see PREREGISTRATION_v0.21 §9 Gate 3a).
+Entry objects mirror the public Rekor v1 API (GET /api/v1/log/entries/{uuid}) and the
+canonical rekord body (spec.data.hash, spec.signature.{format, content, publicKey.content}),
+where the SSH public key is canonicalized by Rekor to ssh.MarshalAuthorizedKey form (no comment).
+A captured REAL Rekor response is required as freeze-gate fixture
+tests/fixtures/rekor_real_entry_dryrun.json (PREREGISTRATION_v0.21 §9 Gate 3a).
 """
 
 import base64
@@ -21,10 +23,17 @@ sys.path.insert(0, TOOLS_DIR)
 import pool_custody  # noqa: E402
 
 LOG_ID = "c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c224f98b9591801d"
+RATIFIER_KEY = "ssh-ed25519 " + base64.b64encode(b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20" + b"R" * 32).decode()
+OTHER_KEY = "ssh-ed25519 " + base64.b64encode(b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20" + b"X" * 32).decode()
+FREEZE_TAG = "1f" * 20
 
 
 def sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
+
+
+def uuid_n(n: int) -> str:
+    return hashlib.sha256(f"entry-{n}".encode()).hexdigest()
 
 
 def make_manifest_bytes(pool_bytes: bytes, **overrides) -> bytes:
@@ -45,17 +54,24 @@ def make_manifest_bytes(pool_bytes: bytes, **overrides) -> bytes:
 
 
 def make_rekor_entry(uuid: str, artifact_sha: str, integrated_time: int, log_index: int,
-                     kind: str = "hashedrekord", with_set: bool = True) -> dict:
+                     key_line: str = RATIFIER_KEY, kind: str = "rekord", sig_format: str = "ssh",
+                     with_set: bool = True, proof_overrides: dict | None = None) -> dict:
     body = {
         "apiVersion": "0.0.1",
         "kind": kind,
         "spec": {
             "data": {"hash": {"algorithm": "sha256", "value": artifact_sha}},
-            "signature": {"content": "c2ln", "publicKey": {"content": "cGs="}},
+            "signature": {
+                "format": sig_format,
+                "content": base64.b64encode(b"-----BEGIN SSH SIGNATURE-----\nU1NIU0lH\n-----END SSH SIGNATURE-----\n").decode(),
+                "publicKey": {"content": base64.b64encode((key_line + "\n").encode()).decode()},
+            },
         },
     }
-    verification = {"inclusionProof": {"checkpoint": "cp", "hashes": [], "logIndex": log_index,
-                                       "rootHash": "00" * 32, "treeSize": log_index + 1}}
+    proof = {"checkpoint": "rekor.sigstore.dev - 1193050959916656506\n", "hashes": ["ab" * 32],
+             "logIndex": log_index, "rootHash": "cd" * 32, "treeSize": log_index + 5}
+    proof.update(proof_overrides or {})
+    verification = {"inclusionProof": proof}
     if with_set:
         verification["signedEntryTimestamp"] = "MEUCIQDsyntheticSET"
     return {uuid: {
@@ -67,32 +83,28 @@ def make_rekor_entry(uuid: str, artifact_sha: str, integrated_time: int, log_ind
     }}
 
 
-def uuid_n(n: int) -> str:
-    return hashlib.sha256(f"entry-{n}".encode()).hexdigest()
-
-
-def make_evidence_bytes(manifest_sha: str, entries: list[dict], retrieved_at: int = 1800000000,
-                        index_uuids: list[str] | None = None, **overrides) -> bytes:
-    if index_uuids is None:
-        index_uuids = [next(iter(e)) for e in entries]
+def make_evidence_bytes(entry: dict, requested_uuid: str | None = None, **overrides) -> bytes:
     ev = {
-        "schema_version": pool_custody.REKOR_EVIDENCE_SCHEMA_VERSION,
+        "schema_version": pool_custody.REKOR_ENTRY_EVIDENCE_SCHEMA_VERSION,
         "rekor_url": pool_custody.REKOR_LOG_URL,
-        "query_sha256": manifest_sha,
-        "retrieved_at_unix": retrieved_at,
-        "index_retrieve_response": index_uuids,
-        "log_entries": entries,
+        "requested_uuid": requested_uuid or next(iter(entry)),
+        "retrieved_at_unix": 1700000000,   # informational only; deliberately earlier than T1 (no skew check)
+        "log_entry": entry,
     }
     ev.update(overrides)
     return pool_custody.canonical_json_bytes(ev)
 
 
-def make_valid_custody(pool_bytes: bytes, pool_size: int, t1: int = 1790000000):
-    """Returns (manifest_bytes, evidence_bytes, commitment, anchor) for a single-entry anchor at T1."""
+def make_valid_custody(pool_bytes: bytes, pool_size: int, t_commit: int = 1790000000, t1: int | None = None):
+    """Returns (manifest_bytes, evidence_bytes, commitment, anchor) with the entry at T1 <= T_commit."""
+    t1 = t_commit - 3600 if t1 is None else t1
     manifest = make_manifest_bytes(pool_bytes)
     m = sha(manifest)
-    evidence = make_evidence_bytes(m, [make_rekor_entry(uuid_n(1), m, t1, 1000)])
-    commitment, anchor = pool_custody.derive_custody_records(
-        manifest, sha(pool_bytes), pool_size, evidence, "rekor-cli v1.3.9 verify (exit 0)",
-        expected_manifest_sha256=m)
+    commitment = pool_custody.build_commitment(FREEZE_TAG, manifest, sha(pool_bytes), pool_size,
+                                               t_commit=t_commit, expected_manifest_sha256=m)
+    subject = sha(pool_custody.canonical_json_bytes(commitment))
+    evidence = make_evidence_bytes(make_rekor_entry(uuid_n(1), subject, t1, 1000))
+    anchor = pool_custody.derive_anchor_receipt(
+        commitment, evidence, "rekor-cli v1.3.9 verify (exit 0)", manifest, sha(pool_bytes), pool_size,
+        expected_manifest_sha256=m, t_commit=t_commit, ratifier_key=RATIFIER_KEY)
     return manifest, evidence, commitment, anchor
