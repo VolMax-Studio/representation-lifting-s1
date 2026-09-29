@@ -13,8 +13,12 @@ import hashlib
 TOOLS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "tools"))
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, TOOLS_DIR)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from unittest import mock
 import analyze
+import pool_custody
+import custody_fixtures
 
 class TestAnalyzeCustody(unittest.TestCase):
 
@@ -474,13 +478,15 @@ class TestAnalyzeCustody(unittest.TestCase):
         indices = select_indices(rand_bytes, pool_size, count=3)
         selected = [{"index": idx, "case_id": f"case_{idx}"} for idx in indices]
         
-        pool_commitment = {
-            "schema_version": "representation-lifting-pool-commitment/v1",
-            "pool_sha256": pool_hash,
-            "pool_size": pool_size,
-            "published_at_unix": t_pub
-        }
-        
+        # v0.21 custody: manifest -> Rekor evidence -> derived commitment/v2 + anchor/v2 (T1 = t_pub)
+        pool_manifest, pool_anchor_evidence, pool_commitment, pool_anchor = custody_fixtures.make_valid_custody(
+            pool_tsv.encode("utf-8"), pool_size, t_pub)
+        self._anchor_extras = {"pool_manifest": pool_manifest, "pool_anchor_evidence": pool_anchor_evidence}
+        patcher = mock.patch.object(pool_custody, "CARRIED_FORWARD_MANIFEST_SHA256",
+                                    hashlib.sha256(pool_manifest).hexdigest())
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
         selection_record = {
             "schema_version": "representation-lifting-selection/v1",
             "quicknet_chain_hash": QUICKNET_CHAIN_HASH,
@@ -488,17 +494,6 @@ class TestAnalyzeCustody(unittest.TestCase):
             "signature_hex": sig_hex,
             "randomness_hex": rand_hex,
             "selected": selected
-        }
-
-        pool_anchor = {
-            "schema_version": "representation-lifting-pool-anchor/v1",
-            "pool_sha256": pool_hash,
-            "commitment_sha256": hashlib.sha256(json.dumps(pool_commitment, sort_keys=True).encode("utf-8")).hexdigest(),
-            "anchor_type": "rekor_transparency_log",
-            "external_proof_id": "rekor_entry_12345678",
-            "verified_timestamp_unix": t_pub,
-            "verifier_tool": "rekor-cli/v1.3.0",
-            "verification_status": "ANCHOR_VERIFIED"
         }
 
         beacon_verification = {
@@ -530,7 +525,7 @@ class TestAnalyzeCustody(unittest.TestCase):
             pool_tsv,
             pool_commitment,
             selection_record,
-            pool_anchor=pool_anchor,
+            pool_anchor=pool_anchor, **self._anchor_extras,
             beacon_verification=beacon_verification
         )
         self.assertEqual(val_selected, selected)
@@ -564,7 +559,7 @@ class TestAnalyzeCustody(unittest.TestCase):
             selection_record=selection_record,
             pool_commitment=pool_commitment,
             pool_tsv=pool_tsv,
-            pool_anchor=pool_anchor,
+            pool_anchor=pool_anchor, **self._anchor_extras,
             beacon_verification=beacon_verification
         )
         h2_res = study["study_adjudication"]["h2_blind_transfer"]["summaries_by_model"]["claude-sonnet-4-6"]
@@ -590,7 +585,7 @@ class TestAnalyzeCustody(unittest.TestCase):
                 selection_record=selection_record,
                 pool_commitment=pool_commitment,
                 pool_tsv=pool_tsv,
-                pool_anchor=pool_anchor,
+                pool_anchor=pool_anchor, **self._anchor_extras,
                 beacon_verification=beacon_verification
             )
 
@@ -613,7 +608,7 @@ class TestAnalyzeCustody(unittest.TestCase):
             selection_record=selection_record,
             pool_commitment=pool_commitment,
             pool_tsv=pool_tsv,
-            pool_anchor=pool_anchor,
+            pool_anchor=pool_anchor, **self._anchor_extras,
             beacon_verification=beacon_verification
         )
         h2_exact = study_exact["study_adjudication"]["h2_blind_transfer"]["summaries_by_model"]["claude-sonnet-4-6"]
@@ -720,7 +715,7 @@ class TestAnalyzeCustody(unittest.TestCase):
             selection_record=selection_record,
             pool_commitment=pool_commitment,
             pool_tsv=pool_tsv,
-            pool_anchor=pool_anchor,
+            pool_anchor=pool_anchor, **self._anchor_extras,
             beacon_verification=None
         )
         h2_res = study["study_adjudication"]["h2_blind_transfer"]["summaries_by_model"]["claude-sonnet-4-6"]
@@ -740,14 +735,14 @@ class TestAnalyzeCustody(unittest.TestCase):
         pool_tsv, pool_commitment, selection_record, pool_anchor, beacon_verification, _ = self._make_valid_selection_custody()
         pool_anchor["verification_status"] = "FAILED"
         with self.assertRaises(analyze.InputContractError):
-            analyze.validate_selection(pool_tsv, pool_commitment, selection_record, pool_anchor=pool_anchor)
+            analyze.validate_selection(pool_tsv, pool_commitment, selection_record, pool_anchor=pool_anchor, **self._anchor_extras)
 
     def test_adversarial_pool_anchor_timestamp_mismatch(self):
         """Adversarial check: pool_anchor timestamp mismatch against published_at_unix is rejected."""
         pool_tsv, pool_commitment, selection_record, pool_anchor, beacon_verification, _ = self._make_valid_selection_custody()
         pool_anchor["verified_timestamp_unix"] += 10
         with self.assertRaises(analyze.InputContractError):
-            analyze.validate_selection(pool_tsv, pool_commitment, selection_record, pool_anchor=pool_anchor)
+            analyze.validate_selection(pool_tsv, pool_commitment, selection_record, pool_anchor=pool_anchor, **self._anchor_extras)
 
     def test_adversarial_beacon_verification_status_failed(self):
         """Adversarial check: beacon_verification with non-verified status is rejected."""
@@ -1095,7 +1090,7 @@ class TestAnalyzeCustody(unittest.TestCase):
         with self.assertRaises(analyze.InputContractError) as ctx:
             analyze.validate_selection(
                 pool_tsv, pool_commitment, selection_record,
-                pool_anchor=pool_anchor, beacon_verification=beacon_verification
+                pool_anchor=pool_anchor, **self._anchor_extras, beacon_verification=beacon_verification
             )
         self.assertIn("public_key_hex mismatch", str(ctx.exception))
 
@@ -1110,7 +1105,7 @@ class TestAnalyzeCustody(unittest.TestCase):
         with self.assertRaises(analyze.InputContractError) as ctx:
             analyze.validate_selection(
                 pool_tsv, pool_commitment, selection_record,
-                pool_anchor=pool_anchor, beacon_verification=beacon_verification
+                pool_anchor=pool_anchor, **self._anchor_extras, beacon_verification=beacon_verification
             )
         self.assertIn("Quicknet public key length violation", str(ctx.exception))
 
@@ -1141,6 +1136,44 @@ class TestAnalyzeCustody(unittest.TestCase):
         self.assertEqual(data["groupHash"], analyze.QUICKNET_GROUP_HASH)
         self.assertEqual(data["groupHash"], analyze.DRAND_QUICKNET_GROUP_HASH)
         self.assertEqual(data["groupHash"], "f477d5c89f21a17c863a7f937c6a6d15859414d2be09cd448d4279af331c5d3e")
+
+    # ---- Amendment v0.21: pre-randomness custody at the analyzer boundary ----
+    def test_v021_anchor_without_manifest_and_evidence_rejected(self):
+        pool_tsv, pool_commitment, selection_record, pool_anchor, beacon_verification, _ = self._make_valid_selection_custody()
+        with self.assertRaises(analyze.InputContractError):
+            analyze.validate_selection(pool_tsv, pool_commitment, selection_record, pool_anchor=pool_anchor)
+        with self.assertRaises(analyze.InputContractError):
+            analyze.validate_selection(pool_tsv, pool_commitment, selection_record, pool_anchor=pool_anchor,
+                                       pool_manifest=self._anchor_extras["pool_manifest"])
+
+    def test_v021_retired_v1_commitment_rejected(self):
+        pool_tsv, pool_commitment, selection_record, pool_anchor, beacon_verification, _ = self._make_valid_selection_custody()
+        v1 = {"schema_version": "representation-lifting-pool-commitment/v1",
+              "pool_sha256": pool_commitment["pool_sha256"], "pool_size": pool_commitment["pool_size"],
+              "published_at_unix": pool_commitment["published_at_unix"]}
+        with self.assertRaises(analyze.InputContractError):
+            analyze.validate_selection(pool_tsv, v1, selection_record)
+
+    def test_v021_manifest_not_carried_forward_rejected_without_test_pin(self):
+        pool_tsv, pool_commitment, selection_record, pool_anchor, beacon_verification, _ = self._make_valid_selection_custody()
+        mock.patch.stopall()  # restore the real pin aef332...; synthetic manifest must now fail
+        with self.assertRaises(analyze.InputContractError):
+            analyze.validate_selection(pool_tsv, pool_commitment, selection_record,
+                                       pool_anchor=pool_anchor, **self._anchor_extras)
+
+    def test_v021_round_must_derive_from_anchor_t1(self):
+        pool_tsv, pool_commitment, selection_record, pool_anchor, beacon_verification, _ = self._make_valid_selection_custody()
+        from drand_schedule import compute_scheduled_round
+        selection_record["round"] = compute_scheduled_round(pool_commitment["published_at_unix"] + 60)
+        with self.assertRaises(analyze.InputContractError):
+            analyze.validate_selection(pool_tsv, pool_commitment, selection_record,
+                                       pool_anchor=pool_anchor, **self._anchor_extras)
+
+    def test_v021_manifest_supplied_without_anchor_still_bound(self):
+        pool_tsv, pool_commitment, selection_record, pool_anchor, beacon_verification, _ = self._make_valid_selection_custody()
+        bad_manifest = self._anchor_extras["pool_manifest"].replace(b'"tools/build_pool.py"', b'"tools/build_pool.pY"')
+        with self.assertRaises(analyze.InputContractError):
+            analyze.validate_selection(pool_tsv, pool_commitment, selection_record, pool_manifest=bad_manifest)
 
     def test_parse_pool_tsv_rejects_duplicate_case_id(self):
         """Asserts that parse_pool_tsv globally rejects duplicate case_ids fail-closed."""

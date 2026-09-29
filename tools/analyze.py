@@ -53,15 +53,18 @@ from typing import Any
 try:
     from select_indices import select_indices
     from drand_schedule import compute_scheduled_round, QUICKNET_CHAIN_HASH, QUICKNET_GROUP_HASH
+    import pool_custody
 except ImportError:
     from tools.select_indices import select_indices
     from tools.drand_schedule import compute_scheduled_round, QUICKNET_CHAIN_HASH, QUICKNET_GROUP_HASH
+    from tools import pool_custody
 
 SCHEMA_VERSION = "representation-lifting-execution-receipt/v1"
 CONFIG_SCHEMA_VERSION = "representation-lifting-executor-config/v1"
 SELECTION_SCHEMA_VERSION = "representation-lifting-selection/v1"
-POOL_COMMITMENT_SCHEMA_VERSION = "representation-lifting-pool-commitment/v1"
-POOL_ANCHOR_SCHEMA_VERSION = "representation-lifting-pool-anchor/v1"
+# Amendment v0.21: pre-randomness custody schemas v2 (v1 retired; see tools/pool_custody.py).
+POOL_COMMITMENT_SCHEMA_VERSION = pool_custody.POOL_COMMITMENT_SCHEMA_VERSION_V2
+POOL_ANCHOR_SCHEMA_VERSION = pool_custody.POOL_ANCHOR_SCHEMA_VERSION_V2
 BEACON_VERIFICATION_SCHEMA_VERSION = "representation-lifting-beacon-verification/v1"
 DRAND_QUICKNET_PUBLIC_KEY_HEX = "83cf0f2896adee7eb8b5f01fcad3912212c437e0073e911fb90022d3e760183c8c4b450b6a0a6c3ac6a5776a2d1064510d1fec758c921cc22b0e17e63aaf4bcb5ed66304de9cf809bd274ca73bab4af5a6e9c76a4bc09e76eae8991ef5ece45a"
 DRAND_QUICKNET_SCHEME_ID = "bls-unchained-g1-rfc9380"
@@ -143,14 +146,19 @@ def validate_selection(
     pool_commitment: dict,
     selection_record: dict,
     pool_anchor: dict | None = None,
-    beacon_verification: dict | None = None
+    beacon_verification: dict | None = None,
+    pool_manifest: bytes | None = None,
+    pool_anchor_evidence: bytes | None = None
 ) -> list[dict]:
     """
     Strict mechanical validation and recomputation of the drand blind selection custody chain:
     POOL bytes -> pool SHA-256 -> pool size -> scheduled round -> beacon signature -> R -> indices -> case_ids.
 
     Validates external anchors when provided:
-    - pool_anchor: verifies external timestamp proof, pool_sha256, and verified_timestamp_unix.
+    - pool_anchor (v0.21): requires the raw pool_bundle_manifest.json bytes and the archived raw
+      Rekor evidence; validates the full chain manifest -> POOL.tsv -> commitment/v2 -> anchor/v2 ->
+      earliest Rekor entry, with published_at_unix == verified_timestamp_unix == T1
+      (tools/pool_custody.validate_pool_custody_v2).
     - beacon_verification: verifies external BLS verification status, chain hash, round, signature, and scheme.
 
     Returns the authoritative list of 3 selected items: [{'index': idx, 'case_id': cid}, ...]
@@ -158,6 +166,10 @@ def validate_selection(
     """
     if not isinstance(pool_commitment, dict):
         raise InputContractError("pool_commitment must be a dictionary.")
+    if pool_commitment.get("schema_version") in pool_custody.RETIRED_SCHEMA_VERSIONS:
+        raise InputContractError(
+            f"pool_commitment uses retired schema '{pool_commitment.get('schema_version')}' (superseded by amendment v0.21)."
+        )
     if pool_commitment.get("schema_version") != POOL_COMMITMENT_SCHEMA_VERSION:
         raise InputContractError(
             f"Pool commitment schema_version mismatch: expected '{POOL_COMMITMENT_SCHEMA_VERSION}', got '{pool_commitment.get('schema_version')}'"
@@ -180,9 +192,35 @@ def validate_selection(
         )
 
     pub_time = pool_commitment.get("published_at_unix")
-    if pub_time is None or not isinstance(pub_time, (int, float)) or pub_time <= 0:
-        raise InputContractError("pool_commitment missing valid positive 'published_at_unix' timestamp.")
-    pub_time_int = int(pub_time)
+    if not isinstance(pub_time, int) or isinstance(pub_time, bool) or pub_time <= 0:
+        raise InputContractError("pool_commitment missing valid positive integer 'published_at_unix' timestamp (v0.21: T1).")
+    pub_time_int = pub_time
+
+    # v0.21: manifest binding is checked whenever the manifest is supplied; with an anchor it is mandatory.
+    if pool_anchor is not None and (pool_manifest is None or pool_anchor_evidence is None):
+        raise InputContractError(
+            "pool_anchor supplied without pool_manifest bytes and pool_anchor_evidence bytes; "
+            "the v0.21 anchor contract cannot be validated from receipt fields alone."
+        )
+    if pool_manifest is not None:
+        if pool_commitment.get("manifest_sha256") != hashlib.sha256(bytes(pool_manifest)).hexdigest():
+            raise InputContractError("pool_commitment.manifest_sha256 does not equal SHA-256 of the supplied manifest bytes.")
+        try:
+            manifest_obj = pool_custody.parse_manifest(pool_manifest)
+        except pool_custody.CustodyError as err:
+            raise InputContractError(f"Pool custody violation: {err}")
+        if manifest_obj["bundle_files"]["POOL.tsv"] != computed_pool_hash:
+            raise InputContractError("Manifest bundle_files['POOL.tsv'] does not equal SHA-256 of the supplied POOL.tsv bytes.")
+    if pool_anchor is not None:
+        try:
+            t1 = pool_custody.validate_pool_custody_v2(
+                pool_manifest, computed_pool_hash, len(pool_case_ids),
+                pool_commitment, pool_anchor, pool_anchor_evidence,
+            )
+        except pool_custody.CustodyError as err:
+            raise InputContractError(f"Pool custody violation: {err}")
+        if t1 != pub_time_int:
+            raise InputContractError(f"Custody T1 {t1} != published_at_unix {pub_time_int}.")
 
     # Validate selection_record
     if not isinstance(selection_record, dict):
@@ -275,27 +313,8 @@ def validate_selection(
             f"Selected case_ids mismatch: recomputed case_ids {expected_case_ids} do not match recorded case_ids {rec_case_ids}."
         )
 
-    # Validate external pool anchor receipt if provided
-    if pool_anchor is not None:
-        if not isinstance(pool_anchor, dict):
-            raise InputContractError("pool_anchor must be a dictionary.")
-        if pool_anchor.get("schema_version") != POOL_ANCHOR_SCHEMA_VERSION:
-            raise InputContractError(
-                f"Pool anchor schema_version mismatch: expected '{POOL_ANCHOR_SCHEMA_VERSION}', got '{pool_anchor.get('schema_version')}'"
-            )
-        if pool_anchor.get("verification_status") != "ANCHOR_VERIFIED":
-            raise InputContractError(
-                f"Pool anchor verification_status must be 'ANCHOR_VERIFIED', got '{pool_anchor.get('verification_status')}'"
-            )
-        if pool_anchor.get("pool_sha256") != computed_pool_hash:
-            raise InputContractError(
-                f"Pool anchor pool_sha256 mismatch: anchor has '{pool_anchor.get('pool_sha256')}', expected '{computed_pool_hash}'"
-            )
-        anchor_ts = pool_anchor.get("verified_timestamp_unix")
-        if anchor_ts is None or int(anchor_ts) != pub_time_int:
-            raise InputContractError(
-                f"Pool anchor timestamp mismatch: anchor recorded {anchor_ts}, but pool_commitment published_at_unix is {pub_time_int}."
-            )
+    # External pool anchor receipt (v0.21) is validated above, before the round is derived
+    # from published_at_unix, so the round can only be computed from an anchor-bound T1.
 
     # Validate external beacon verification receipt if provided
     if beacon_verification is not None:
@@ -352,7 +371,9 @@ def validate_study_inputs(
     pool_commitment: dict | None = None,
     pool_tsv: str | bytes | None = None,
     pool_anchor: dict | None = None,
-    beacon_verification: dict | None = None
+    beacon_verification: dict | None = None,
+    pool_manifest: bytes | None = None,
+    pool_anchor_evidence: bytes | None = None
 ) -> list[dict] | None:
     """
     Strictly validates input contract before any analysis:
@@ -421,7 +442,7 @@ def validate_study_inputs(
         seen_calib.add(pair)
 
     # 3. Blind receipts and Selection Custody validation
-    has_any_selection = (selection_record is not None or pool_commitment is not None or pool_tsv is not None or pool_anchor is not None or beacon_verification is not None)
+    has_any_selection = (selection_record is not None or pool_commitment is not None or pool_tsv is not None or pool_anchor is not None or beacon_verification is not None or pool_manifest is not None or pool_anchor_evidence is not None)
     validated_selected = None
     selected_case_ids = None
 
@@ -435,7 +456,9 @@ def validate_study_inputs(
             pool_commitment,
             selection_record,
             pool_anchor=pool_anchor,
-            beacon_verification=beacon_verification
+            beacon_verification=beacon_verification,
+            pool_manifest=pool_manifest,
+            pool_anchor_evidence=pool_anchor_evidence
         )
         selected_case_ids = {item["case_id"] for item in validated_selected}
 
@@ -754,7 +777,11 @@ def adjudicate_study(
     beacon_verification_path: str | None = None,
     config_path: str | None = None,
     config: dict | None = None,
-    control_receipt: dict | None = None
+    control_receipt: dict | None = None,
+    pool_manifest: bytes | None = None,
+    pool_anchor_evidence: bytes | None = None,
+    pool_manifest_path: str | None = None,
+    pool_anchor_evidence_path: str | None = None
 ) -> dict:
     """
     Comprehensive multi-arm study adjudication under v0.17 governance.
@@ -790,6 +817,12 @@ def adjudicate_study(
     if beacon_verification_path and beacon_verification is None:
         with open(beacon_verification_path, "r", encoding="utf-8") as f:
             beacon_verification = json.load(f)
+    if pool_manifest_path and pool_manifest is None:
+        with open(pool_manifest_path, "rb") as f:
+            pool_manifest = f.read()
+    if pool_anchor_evidence_path and pool_anchor_evidence is None:
+        with open(pool_anchor_evidence_path, "rb") as f:
+            pool_anchor_evidence = f.read()
 
     cfg = config or load_executor_config(config_path)
     primary_id = cfg["primary_model_id"]
@@ -806,7 +839,9 @@ def adjudicate_study(
         pool_commitment=pool_commitment,
         pool_tsv=pool_tsv,
         pool_anchor=pool_anchor,
-        beacon_verification=beacon_verification
+        beacon_verification=beacon_verification,
+        pool_manifest=pool_manifest,
+        pool_anchor_evidence=pool_anchor_evidence
     )
 
     # 1. Negative Control Evaluation per model
@@ -1007,6 +1042,8 @@ def main():
     parser.add_argument("--pool-tsv", type=str, help="Optional path to POOL.tsv file")
     parser.add_argument("--pool-anchor", type=str, help="Optional path to pool_anchor_receipt.json file")
     parser.add_argument("--beacon-verification", type=str, help="Optional path to beacon_verification_receipt.json file")
+    parser.add_argument("--pool-manifest", type=str, help="Path to pool_bundle_manifest.json (required with --pool-anchor, v0.21)")
+    parser.add_argument("--pool-anchor-evidence", type=str, help="Path to archived raw Rekor evidence JSON (required with --pool-anchor, v0.21)")
     parser.add_argument("--all-from-dir", type=str, help="Directory containing receipt files to automatically collect and adjudicate")
     parser.add_argument("--config", type=str, help="Optional path to executor_config.json")
     parser.add_argument("--out", type=str, help="Optional output JSON path for the adjudication report")
@@ -1095,6 +1132,8 @@ def main():
         pool_tsv=pool_bytes_data,
         pool_anchor=pool_anchor_data,
         beacon_verification=beacon_verif_data,
+        pool_manifest_path=args.pool_manifest,
+        pool_anchor_evidence_path=args.pool_anchor_evidence,
         config_path=args.config
     )
     
