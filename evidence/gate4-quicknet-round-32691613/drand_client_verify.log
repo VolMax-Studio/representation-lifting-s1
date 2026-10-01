@@ -1,0 +1,13 @@
+{
+  "verification_status": "BLS_VERIFIED",
+  "verifier": "official drand/drand-client npm package",
+  "verifier_version": "1.4.2",
+  "verifier_git_tag_commit": "ef8c9260294f8699b5e8c27a6b764f8f0d768bea",
+  "round": 32691613,
+  "signature_hex": "818caf5437ecdbfc89f9c2ccfd831d1d15fa2b4e41707cdfbbbff839dad1fae24193eef9089bdd85d187c76600a27a33",
+  "signature_length_bytes": 48,
+  "randomness_hex": "3d8063ce46d40438e9f24b2a3a927005d38d8a433edcea118a21922c5e1832ab",
+  "quicknet_chain_hash": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+  "public_key_hex": "83cf0f2896adee7eb8b5f01fcad3912212c437e0073e911fb90022d3e760183c8c4b450b6a0a6c3ac6a5776a2d1064510d1fec758c921cc22b0e17e63aaf4bcb5ed66304de9cf809bd274ca73bab4af5a6e9c76a4bc09e76eae8991ef5ece45a",
+  "scheme_id": "bls-unchained-g1-rfc9380"
+}
