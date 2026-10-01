@@ -50,3 +50,13 @@ Frozen analyzer full custody replay:
 PASS
 
 No theorem-solving output was used to choose or alter the selected cases.
+
+## Post-review append-only notes
+
+Independent Gate 4 review returned `SURVIVES-REVIEW (with limitations)`.
+
+1. The previously external run2 `POOL.tsv` and `pool_bundle_manifest.json` have now been published byte-for-byte under `evidence/pool-build-local-002/`, together with the run2 exclusion tables, report, execution log, and exit code. Their SHA-256 values remain `398ddcb3d9e915edce681c0d59138950177d7eb096200795f927741fb9743212` and `aef332f69fb7bf70c0032dc05a383f8fea0085fecbd2ba22281c48ef4c36f7f6` respectively.
+
+2. Before adopting `drand/drand-client` v1.4.2 as the normative Gate 4 verifier, an attempted build of the preregistration example `drand v1.5.8` was abandoned after network/DNS failures while fetching Go dependencies. It produced no verifier binary and did not contribute to the beacon verdict, randomness, selection, or case mapping.
+
+3. The archived `verify_with_official_drand_client.cjs` is an execution transcript helper, not a portable replay script: it references the original `custody/gate4-quicknet-round-32691613/` path, prints the pinned Quicknet hash/public key as literals for its output record, and fetched the beacon live before comparing it with the archived primary relay copy. The official package bundle independently pins the same Quicknet chain hash and public key and performs beacon verification; the review treated these helper-script details as non-blocking.

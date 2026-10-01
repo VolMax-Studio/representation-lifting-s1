@@ -1,0 +1,21 @@
+================================================================================
+DETERMINISTIC POOL BUILDER — representation-lifting-s1 (v0.20)
+================================================================================
+Source JSONL:     /home/volmax-studio/volmax-projects/iot2/ARCHIVE_EXTERNAL/ProofNet-Verified/data/proofnet-verified.jsonl
+Output Directory: ../representation-lifting-s1-pool-run2
+Fixture Mode:     False
+Heartbeat Limit:  200000
+Watchdog Timeout: 600s
+--------------------------------------------------------------------------------
+PARTITION RESULTS:
+  Total Source Entries:            367
+  POOL (surviving blind pool):     362
+  EXCLUDED_TRIVIAL (tactics):      1
+  EXCLUDED_TOOLCHAIN_INCOMPATIBLE: 4
+  INPUT_ERROR (format/parse):      0
+  INFRA_HANG (watchdog timeout):   0
+  Partition Invariant Satisfied:   True
+--------------------------------------------------------------------------------
+INTERNAL BUNDLE SHA-256:           55fe00f41a6a9a3e8e4d5fd0e7e9b3f231b1e4b19ce8aaeb66728575cb00b166
+WHOLE MANIFEST SHA-256 (ANCHOR):   aef332f69fb7bf70c0032dc05a383f8fea0085fecbd2ba22281c48ef4c36f7f6
+================================================================================

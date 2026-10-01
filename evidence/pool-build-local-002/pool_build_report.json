@@ -1,0 +1,19 @@
+{
+  "builder_version": "v0.20",
+  "deterministic_max_heartbeats": 200000,
+  "partition_counts": {
+    "excluded_toolchain_incompatible": 4,
+    "excluded_trivial": 1,
+    "infra_hang": 0,
+    "input_error": 0,
+    "pool": 362
+  },
+  "partition_equation": "total_source_entries == pool + excluded_trivial + excluded_toolchain_incompatible + input_error",
+  "partition_invariant_satisfied": true,
+  "schema_version": "representation-lifting-pool-build-report/v1",
+  "source_commit": "160414332dc196583f6c37c310b420d2a3b07c58",
+  "source_jsonl_sha256": "381f4a06548a4ff6d9b923633c94a97b9c70f41033e13023aae31e1161b7f142",
+  "source_repository": "https://github.com/marcusm117/ProofNet-Verified.git",
+  "total_source_entries": 367,
+  "watchdog_timeout_seconds": 600
+}

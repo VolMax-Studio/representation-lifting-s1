@@ -1,0 +1,19 @@
+{
+  "anchor_rule": "The external timestamp anchor (Rekor/RFC3161/OpenTimestamps) must anchor the SHA-256 of this entire pool_bundle_manifest.json file, cryptographically binding source metadata, builder code, and all output hashes.",
+  "builder_name": "tools/build_pool.py",
+  "builder_sha256": "fccafe9e5a968098d99c7bd00015885c75be506c88854f220060862a8f7e3a65",
+  "bundle_files": {
+    "EXCLUDED_TOOLCHAIN_INCOMPATIBLE.tsv": "65f349c53f5e674393ef4388a0ef841f23370f51352cdb72f950830be899c432",
+    "EXCLUDED_TRIVIAL.tsv": "5441afe96b31649c8957f7f6a6501d0d2aaf85805544b2d646e523b9fb01f928",
+    "INPUT_ERROR.tsv": "4b2bac245cb1a14f3ac47d9e67cd905131d4107b170f64cde74f3741f639fa39",
+    "POOL.tsv": "398ddcb3d9e915edce681c0d59138950177d7eb096200795f927741fb9743212",
+    "pool_build_report.json": "5b3d253d70505dd99d120143d5acd5029dd189a05f9e7d2edc7142c34576fd2a"
+  },
+  "bundle_sha256": "55fe00f41a6a9a3e8e4d5fd0e7e9b3f231b1e4b19ce8aaeb66728575cb00b166",
+  "filter_name": "tools/nontriviality_filter.py",
+  "filter_sha256": "de48d2c28a735d0128e49a3a714708bf8fe1cf60cff20a70cff251649d921fdf",
+  "schema_version": "representation-lifting-pool-bundle-manifest/v1",
+  "source_commit": "160414332dc196583f6c37c310b420d2a3b07c58",
+  "source_jsonl_sha256": "381f4a06548a4ff6d9b923633c94a97b9c70f41033e13023aae31e1161b7f142",
+  "source_repository": "https://github.com/marcusm117/ProofNet-Verified.git"
+}

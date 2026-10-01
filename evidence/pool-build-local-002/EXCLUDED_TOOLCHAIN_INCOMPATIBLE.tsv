@@ -1,0 +1,5 @@
+case_id	source_name	reason
+proofnet-045	Dummit_Foote_exercise_3_4_5a	baseline_elaboration_failed: error: invalid binder annotation, type is not a class instance
+proofnet-046	Dummit_Foote_exercise_3_4_11	baseline_elaboration_failed: error: invalid binder annotation, type is not a class instance
+proofnet-122	Munkres_exercise_25_4	baseline_elaboration_failed: error: invalid binder annotation, type is not a class instance
+proofnet-229	Dummit_Foote_exercise_3_4_5b	baseline_elaboration_failed: error: invalid binder annotation, type is not a class instance
