@@ -1,0 +1,9 @@
+{
+  "freeze_tag_object_id": "336e73f3c016129812c9985fc7eed43bbfb27cc8",
+  "manifest_sha256": "aef332f69fb7bf70c0032dc05a383f8fea0085fecbd2ba22281c48ef4c36f7f6",
+  "pool_sha256": "398ddcb3d9e915edce681c0d59138950177d7eb096200795f927741fb9743212",
+  "pool_size": 362,
+  "protocol": "representation-lifting-s1/v0.21",
+  "published_at_unix": 1790877600,
+  "schema_version": "representation-lifting-pool-commitment/v2"
+}

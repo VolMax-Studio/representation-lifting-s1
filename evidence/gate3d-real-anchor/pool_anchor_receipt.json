@@ -1,0 +1,15 @@
+{
+  "anchor_evidence_sha256": "4ad3b507df3ff2a1103714ea6f9f050731b559ee7c5a6a9d58c4e8477a057c16",
+  "anchor_type": "rekor",
+  "integrated_time_unix": 1790692425,
+  "manifest_sha256": "aef332f69fb7bf70c0032dc05a383f8fea0085fecbd2ba22281c48ef4c36f7f6",
+  "pool_sha256": "398ddcb3d9e915edce681c0d59138950177d7eb096200795f927741fb9743212",
+  "ratifier_ssh_public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAID0Yhb6zPoq9Kwnlx+pJqZ3UVh8pi7lyiStkajEo1R9m",
+  "rekor_log_index": 3001122590,
+  "rekor_url": "https://rekor.sigstore.dev",
+  "rekor_uuid": "617ade4871f9361c6e62227db2b9c62c87508f6c46f8d721460b04a31299b382",
+  "schema_version": "representation-lifting-pool-anchor/v2",
+  "subject_sha256": "47d77302f48dfc92b4eb6fc01618f8bf99dc07d580f8cf43d1c7195e14688af9",
+  "verification_status": "ANCHOR_VERIFIED",
+  "verifier": "rekor-cli v1.3.6 verify (exit 0); binary sha256 74e4b3119723ab5bad31166e509be83f3a84549b1f24a0a9fe65b6de22668784"
+}
