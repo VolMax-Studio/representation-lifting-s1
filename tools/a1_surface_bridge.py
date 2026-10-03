@@ -478,6 +478,14 @@ def a1_call_surface(
         transcript.append({"event": "a1_bridge_unknown_model", "model_id": model_id})
         return "", None, True
     surface_config = surfaces[surface_key]
+    execution_status = surface_config.get("execution_status")
+    if isinstance(execution_status, str) and execution_status.startswith("NOT_EVALUABLE_INFRA"):
+        transcript.append({
+            "event": "a1_bridge_surface_disabled",
+            "surface_key": surface_key,
+            "status": execution_status,
+        })
+        return "", "SURFACE_DISABLED", True
 
     if artifact_dir is None:
         root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))

@@ -527,6 +527,18 @@ class TestA1SurfaceBridge(unittest.TestCase):
         self.assertEqual(out, ("OK", "end_turn", False))
         self.assertEqual(len(calls), 2)
 
+    def test_deferred_surface_fails_closed_before_relay(self):
+        cfg = _make_flattened_surface_config(self.tmp)
+        cfg["surfaces"]["replication"]["execution_status"] = "NOT_EVALUABLE_INFRA_REPLICATION_SURFACE_NOT_RECONNOITERED"
+        with patch.object(bridge, "_relay_manual_chatgpt") as relay:
+            out = bridge.a1_call_surface(
+                "gpt-5.6-sol", [{"role": "user", "content": "x"}],
+                "sys", 60.0, {}, [], a1_config=cfg,
+                artifact_dir=self.tmp, turn_number=0,
+            )
+        self.assertEqual(out, ("", "SURFACE_DISABLED", True))
+        relay.assert_not_called()
+
     def test_bridge_does_not_retry_nonretryable_model_identity_failure(self):
         cfg = _make_native_surface_config(self.tmp)
         calls = []
