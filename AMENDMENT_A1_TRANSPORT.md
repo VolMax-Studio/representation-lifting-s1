@@ -318,11 +318,15 @@ protocol. The protocol-defined system prompt is explicitly authorized.
 The surface relay artifact (surface_input_N.txt) is the exact text sent to
 the subscription surface.
 
-**Surfaces with caller-controlled system-message semantics** (e.g., Claude Code
+**Surfaces with caller-controlled system-message semantics** (Claude Code
 CLI with --system-prompt flag):
-- system_prompt is passed via the surface's system-message mechanism.
-- surface_input_N.txt contains only the current user-turn content.
+- system_prompt is passed via the surface's native system-message mechanism.
+- Each CLI bridge call is intentionally stateless/fresh. Therefore, on turn 1
+  surface_input_N.txt contains only the current user content; on later turns the
+  frozen prior user/assistant message history is deterministically serialized into
+  the user content before the current request.
 - Record: system_role_handling: "NATIVE_SYSTEM_MESSAGE"
+- Record: message_history_handling: "DEGRADED_HISTORY_FLATTENED_TO_USER_CONTENT"
 
 **Surfaces WITHOUT caller-controlled system-message semantics** (e.g., ChatGPT web):
 - Record: system_role_handling: "DEGRADED_SYSTEM_ROLE_FLATTENED_TO_USER_CONTENT"
@@ -361,8 +365,11 @@ tools/a1_surface_bridge.py MUST:
 - Emit request_N.json and surface_input_N.txt with SHA-256 before relay
 - Emit response_N.txt with SHA-256 after relay
 - Enforce request timeout capped by remaining_wallclock
-- NOT parse response content, NOT invoke Lean, NOT construct feedback,
-  NOT advance state machine, NOT generate prompt content
+- MAY parse only the subscription surface's transport envelope/metadata needed
+  to extract the verbatim model result and verify provider-reported model/tool
+  metadata; it MUST NOT semantically interpret proof content
+- NOT invoke Lean, NOT construct feedback, NOT advance state machine,
+  NOT generate prompt content
 
 The bridge implementation SHA-256 is frozen in a1_transport_config.json.
 
@@ -399,26 +406,33 @@ The candidate commit includes tests/test_a1_surface_bridge.py demonstrating:
 
 **A1.10.1 Evidence standard under A1:**
 
-| Property | API Transport (v0.21) | Subscription Surface (A1) |
-|---|---|---|
-| Machine-readable model ID per response | YES (body["model"]) | NO |
-| Programmatic exact-match verification | YES (harness code) | NO (human check against frozen label set) |
-| Provider names served model | YES (per-response JSON) | PARTIAL (session-level UI label) |
-| Silent substitution detectable | YES | NO |
+- **Primary / Claude Code CLI:** the bridge uses `--output-format stream-json --verbose`.
+  The provider-generated `system/init` event contains a machine-readable `model`
+  field plus `tools` and `mcp_servers`. The bridge checks `init.model` against the
+  frozen allowed-label set on every invocation and fails closed on mismatch.
+- **Replication / ChatGPT web:** model identity evidence remains the weaker
+  provider-displayed UI label and is not machine-readable per response. Replication
+  remains subject to the surface-label limitations documented by A1.
+
+For the primary route, model identity evidence is therefore stronger than the
+original r5 assumption: it is programmatically checked from Claude Code's emitted
+transport metadata rather than inferred from the requested `--model` flag alone.
 
 **A1.10.2 Fail-closed triggers:**
 
 Execution halts with MODEL_IDENTITY_FAIL if:
-- Provider model label is **absent**
-- Provider model label **changes** during a session
-- Provider model label is **not a member** of the frozen allowed-label set
+- Primary: Claude Code emits no `system/init.model`, or the emitted model ID is
+  not a member of the frozen primary allowed-label set on any invocation.
+- Replication: the provider UI model label is absent, changes during a session,
+  or is not a member of the frozen replication allowed-label set.
 
 These are objective set-membership criteria. No subjective assessment is used.
 
 **A1.10.3 Per-session captures:**
 
-Screenshot or terminal output of the active model label at session start. For
-sessions exceeding 30 minutes, at least one additional mid-session capture.
+Primary evidence is the hash-addressed transcript event containing Claude Code's
+machine-readable `system/init` metadata for each invocation. Replication, if later
+enabled, requires the surface-label capture specified by A1.
 
 ---
 
@@ -429,11 +443,17 @@ ratification and BEFORE any executor sees blind content. Gate 5 VERIFIES the
 configuration frozen during reconnaissance. It does not choose, discover, or
 populate any value.
 
-**A1.11.1 Procedure (per surface):**
+For the current A1 ratification, the **primary Claude Code surface is enabled**.
+Replication is explicitly frozen as `NOT_EVALUABLE_INFRA_REPLICATION_SURFACE_NOT_RECONNOITERED`
+and does not block the preregistered primary execution. Enabling replication later
+requires its own completed reconnaissance/config review before its Gate 5.
+
+**A1.11.1 Procedure (enabled surface):**
 
 1. Open surface, authenticate, apply ALL frozen settings from a1_transport_config.json.
 2. Record surface version as observed.
-3. Confirm model label is in the frozen allowed-label set. Capture evidence.
+3. Primary: verify `system/init.model` emitted by Claude Code is in the frozen
+   allowed-label set and `system/init.tools` is empty with no active MCP servers.
 4. Send neutral probe prompt via a1_surface_bridge.py:
    - system_prompt: "Gate 5 smoke test. Follow the user instruction exactly."
    - messages: [{"role": "user", "content": "Respond with exactly the following JSON and nothing else:\n{\"status\": \"ok\", \"probe\": \"representation-lifting-s1-gate5\"}"}]
@@ -608,12 +628,12 @@ The following remain identical to frozen v0.21:
 
 ## Reconnaissance Record (Claude Code CLI)
 
-**Performed:** 2026-10-02 (pre-candidate commit, no inference prompt sent)
+**Performed/updated:** 2026-10-03T06:51:50Z (pre-ratification, no inference prompt sent)
 
 | Item | Value |
 |---|---|
 | Surface type | claude-code-cli |
-| CLI version | 2.1.197 |
+| CLI version | 2.1.197 (Claude Code) |
 | Executable path | /home/volmax-studio/.npm-global/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe |
 | Executable SHA-256 | f54e69cbc89b2da61a415700af7ff52a147e862517d4f1b0eecf768448cf7f83 |
 | Authentication | Anthropic subscription (Claude.ai Pro), first-party OAuth, active |
@@ -622,24 +642,19 @@ The following remain identical to frozen v0.21:
 | Tool restriction flags | --tools "" (empty allowlist) |
 | Safe mode flag | --safe-mode |
 | Effort control | --effort low|medium|high|xhigh|max; pinned to: high |
-| Output mode | --print (non-interactive, single response) |
-| Model routing verified? | NO — CLI accepts identifier only; actual routing verified at Gate 5 |
-| Allowed model labels | To be confirmed at Gate 5 from CLI output |
+| Output mode | --print --output-format stream-json --verbose --no-session-persistence --max-turns 1 |
+| Model routing verified? | NO pre-ratification — actual provider-reported `system/init.model` is verified at Gate 5 |
+| Allowed model labels | claude-sonnet-4-6 |
+| Model identity evidence | machine-readable Claude Code `system/init.model` per invocation |
+| Tool exposure evidence | `system/init.tools` must be empty; no active MCP servers |
 
 ## Reconnaissance Record (ChatGPT Web)
 
-**Status: REQUIRES IVAN MANUAL INPUT**
+**Status: DEFERRED — REPLICATION NOT EVALUABLE UNDER THIS A1 RATIFICATION**
 
-The following fields require visual reconnaissance from the investigator:
-
-1. **Exact model label displayed** in the ChatGPT model picker for "GPT-5.6 Sol"
-   (screenshot required).
-2. **Available inference controls** exposed in the UI (reasoning effort, temperature
-   toggle if any, response length if any) — screenshot of settings panel.
-3. **Tool/capability toggles** available (web search, code interpreter, etc.) —
-   screenshot showing what can be disabled.
-4. **Memory/custom instructions disable** — confirm these can be disabled and that
-   the fresh conversation context is achievable.
-5. **Observed ChatGPT build/version** visible in the UI.
-
-Do not proceed to candidate commit until Ivan provides these five items.
+The replication surface has not been reconnoitered and is therefore frozen as
+`NOT_EVALUABLE_INFRA_REPLICATION_SURFACE_NOT_RECONNOITERED`. This does not block
+primary execution because replication is preregistered as secondary and cannot
+rescue or alter the primary verdict. A later attempt to enable replication must
+complete its surface reconnaissance, config freeze, review, and Gate 5 before any
+replication S/D/L execution.

@@ -4,23 +4,23 @@
   "supersedes_transport_in": "tools/executor_config.json",
   "frozen_executor_config_sha256": "395deb97fa2b038a93ce416ced4ce3bcba31cddea30db7f3daa5ee5bc01f4b04",
   "frozen_executor_harness_sha256": "ccb1cad202fcdd2dbd931c3b8c5d65d9d368a0bdb26da8946e9b8671b07d8c48",
-  "bridge_sha256": "d49ea76b3c35fef5ac5eaacd7b101e889e6de4dc0a0c1b05cec9d58a998eca4d",
-  "bridge_tests_sha256": "6794859e858948fdc9c385bff7b03b724b8afa522e6c38e6e6e54f5cfa311408",
-  "reconnaissance_timestamp_utc": "2026-10-02T00:00:00+00:00",
+  "bridge_sha256": "40dc6f13364a344483c313fb7596189f38ef8e4736dc50997230d381c66ee2a4",
+  "bridge_tests_sha256": "2072ccf23252d900177334e91dc3d5652fac8da5bc7bfecd0d534457add01809",
+  "reconnaissance_timestamp_utc": "2026-10-03T06:51:50Z",
   "surfaces": {
     "primary": {
       "pinned_model_id": "claude-sonnet-4-6",
       "surface_type": "claude-code-cli",
-      "surface_version": "2.1.197",
+      "surface_version": "2.1.197 (Claude Code)",
       "executable_path": "/home/volmax-studio/.npm-global/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe",
       "surface_binary_sha256": "f54e69cbc89b2da61a415700af7ff52a147e862517d4f1b0eecf768448cf7f83",
       "frozen_api_endpoint": "https://api.anthropic.com/v1/messages",
       "frozen_api_endpoint_status": "NOT_USED_UNDER_A1",
       "allowed_model_labels": [
-        "__FILL_AT_GATE5_FROM_CLI_OUTPUT__"
+        "claude-sonnet-4-6"
       ],
       "system_role_handling": "NATIVE_SYSTEM_MESSAGE",
-      "message_history_handling": "NATIVE_MULTI_TURN",
+      "message_history_handling": "DEGRADED_HISTORY_FLATTENED_TO_USER_CONTENT",
       "inference_controls_pinned": {
         "temperature": "DEGRADED_NO_TEMPERATURE_CONTROL",
         "max_tokens": "DEGRADED_SURFACE_DEFAULT_MAX_TOKENS",
@@ -29,9 +29,16 @@
       "tool_capabilities": {
         "all_tools": "disabled_via_--tools_empty_and_--safe-mode"
       },
-      "cli_invocation_template": "claude --model claude-sonnet-4-6 --effort high --safe-mode --tools \"\" --system-prompt <SYSTEM_PROMPT> --print <USER_CONTENT>",
+      "cli_invocation_template": "claude --model claude-sonnet-4-6 --effort high --safe-mode --tools \"\" --system-prompt <SYSTEM_PROMPT> --print --output-format stream-json --verbose --no-session-persistence --max-turns 1 <USER_CONTENT>",
       "sanitized_directory_verified": true,
-      "flattening_scheme": null,
+      "model_identity_evidence": "CLAUDE_CODE_STREAM_JSON_INIT_MODEL",
+      "tool_exposure_evidence": "CLAUDE_CODE_STREAM_JSON_INIT_TOOLS_AND_MCP_SERVERS",
+      "flattening_scheme": {
+        "history_delimiter_start": "=== CONVERSATION HISTORY ===",
+        "history_turn_format": "[Turn {n} - {ROLE}]:",
+        "history_delimiter_end": "=== END CONVERSATION HISTORY ===",
+        "current_delimiter": "=== CURRENT REQUEST ==="
+      },
       "request_timeout_seconds": 600,
       "model_routing_verified": false,
       "model_routing_note": "CLI accepts identifier; actual routing verified at Gate 5 only"
@@ -39,27 +46,26 @@
     "replication": {
       "pinned_model_id": "gpt-5.6-sol",
       "surface_type": "chatgpt-web",
-      "surface_version_observed": "__FILL_AFTER_IVAN_RECONNAISSANCE__",
+      "surface_version_observed": "NOT_RECONNOITERED__REPLICATION_DEFERRED",
       "frozen_api_endpoint": "https://api.openai.com/v1/chat/completions",
       "frozen_api_endpoint_status": "NOT_USED_UNDER_A1",
-      "allowed_model_labels": [
-        "__FILL_AFTER_IVAN_RECONNAISSANCE__"
-      ],
+      "allowed_model_labels": [],
       "system_role_handling": "DEGRADED_SYSTEM_ROLE_FLATTENED_TO_USER_CONTENT",
       "message_history_handling": "DEGRADED_HISTORY_FLATTENED_TO_USER_CONTENT",
       "inference_controls_pinned": {
-        "temperature": "__FILL_AFTER_IVAN_RECONNAISSANCE__",
-        "max_tokens": "__FILL_AFTER_IVAN_RECONNAISSANCE__",
-        "reasoning_effort": "__FILL_AFTER_IVAN_RECONNAISSANCE__"
+        "temperature": "NOT_EVALUABLE_INFRA_REPLICATION_DEFERRED",
+        "max_tokens": "NOT_EVALUABLE_INFRA_REPLICATION_DEFERRED",
+        "reasoning_effort": "NOT_EVALUABLE_INFRA_REPLICATION_DEFERRED"
       },
       "tool_capabilities": {
-        "__FILL_AFTER_IVAN_RECONNAISSANCE__": "__FILL_AFTER_IVAN_RECONNAISSANCE__"
+        "status": "NOT_EVALUABLE_INFRA_REPLICATION_DEFERRED"
       },
       "isolation_settings": {
-        "memory": "__FILL_AFTER_IVAN_RECONNAISSANCE__",
-        "custom_instructions": "__FILL_AFTER_IVAN_RECONNAISSANCE__",
-        "history": "__FILL_AFTER_IVAN_RECONNAISSANCE__"
+        "memory": "NOT_EVALUABLE_INFRA_REPLICATION_DEFERRED",
+        "custom_instructions": "NOT_EVALUABLE_INFRA_REPLICATION_DEFERRED",
+        "history": "NOT_EVALUABLE_INFRA_REPLICATION_DEFERRED"
       },
+      "execution_status": "NOT_EVALUABLE_INFRA_REPLICATION_SURFACE_NOT_RECONNOITERED",
       "flattening_scheme": {
         "system_delimiter_start": "=== PROTOCOL SYSTEM INSTRUCTIONS (DO NOT MODIFY) ===",
         "system_delimiter_end": "=== END PROTOCOL SYSTEM INSTRUCTIONS ===",
@@ -76,22 +82,12 @@
     "primary:DEGRADED_SURFACE_DEFAULT_MAX_TOKENS",
     "replication:DEGRADED_SYSTEM_ROLE_FLATTENED_TO_USER_CONTENT",
     "replication:DEGRADED_HISTORY_FLATTENED_TO_USER_CONTENT",
-    "replication:DEGRADED_NO_TEMPERATURE_CONTROL_PENDING_RECONNAISSANCE",
-    "all:MODEL_IDENTITY_EVIDENCE_SURFACE_LABEL_ONLY"
+    "replication:NOT_EVALUABLE_INFRA_SURFACE_RECONNAISSANCE_DEFERRED",
+    "primary:DEGRADED_HISTORY_FLATTENED_TO_USER_CONTENT",
+    "replication:MODEL_IDENTITY_EVIDENCE_SURFACE_LABEL_ONLY"
   ],
-  "fields_requiring_ivan_reconnaissance": [
-    "surfaces.replication.surface_version_observed",
-    "surfaces.replication.allowed_model_labels",
-    "surfaces.replication.inference_controls_pinned.temperature",
-    "surfaces.replication.inference_controls_pinned.max_tokens",
-    "surfaces.replication.inference_controls_pinned.reasoning_effort",
-    "surfaces.replication.tool_capabilities",
-    "surfaces.replication.isolation_settings.memory",
-    "surfaces.replication.isolation_settings.custom_instructions",
-    "surfaces.replication.isolation_settings.history",
-    "surfaces.primary.allowed_model_labels"
-  ],
-  "status": "RECONNAISSANCE_PARTIAL__CHATGPT_FIELDS_PENDING__DO_NOT_RATIFY_YET",
+  "fields_requiring_ivan_reconnaissance": [],
+  "status": "PRIMARY_READY_FOR_REVIEW__REPLICATION_NOT_EVALUABLE_INFRA_DEFERRED",
   "bridge_activate_sha256": "c34bd4628868ad9670e62ef9671bde0c7913b90c0ab006af9c0c832387c620ed",
-  "amendment_text_sha256": "b4521b024adae272004af30a90752056e9a805b053620373ab1812e48a7c9c5a"
+  "amendment_text_sha256": "bb60cabb054f912ed5514da806eb834e3e991b04095699c8f7b96e948ab17daa"
 }

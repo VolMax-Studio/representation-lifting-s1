@@ -487,6 +487,100 @@ class TestA1SurfaceBridge(unittest.TestCase):
                 os.path.join(self.tmp, "responses", f"response_{t}.txt")
             ))
 
+    def test_primary_stateless_cli_preserves_history_via_flattening(self):
+        """Primary fresh CLI calls must carry prior user/assistant history explicitly."""
+        cfg = _make_native_surface_config(self.tmp)
+        sc = cfg["surfaces"]["primary"]
+        sc["message_history_handling"] = "DEGRADED_HISTORY_FLATTENED_TO_USER_CONTENT"
+        sc["flattening_scheme"] = {
+            "history_delimiter_start": "=== CONVERSATION HISTORY ===",
+            "history_turn_format": "[Turn {n} - {ROLE}]:",
+            "history_delimiter_end": "=== END CONVERSATION HISTORY ===",
+            "current_delimiter": "=== CURRENT REQUEST ===",
+        }
+        msgs = [
+            {"role": "user", "content": "U1"},
+            {"role": "assistant", "content": "A1"},
+            {"role": "user", "content": "U2"},
+        ]
+        path, _, _ = bridge.emit_surface_input(self.tmp, 4, "SYS", msgs, sc)
+        content = open(path, encoding="utf-8").read()
+        self.assertIn("U1", content)
+        self.assertIn("A1", content)
+        self.assertIn("U2", content)
+        self.assertNotIn("SYS", content)
+
+    def test_bridge_retries_pre_response_failure_with_frozen_budget(self):
+        """A pre-response infra failure may retry within frozen max-attempts budget."""
+        cfg = _make_native_surface_config(self.tmp)
+        calls = []
+        def fake_cli(*args):
+            calls.append(1)
+            return ("", None, True) if len(calls) == 1 else ("OK", "end_turn", False)
+        transport_cfg = {"transport_policy": {"max_attempts_per_turn": 3, "backoff_seconds": [0, 0]}}
+        with patch.object(bridge, "_relay_claude_code_cli", side_effect=fake_cli):
+            out = bridge.a1_call_surface(
+                "claude-sonnet-4-6", [{"role": "user", "content": "x"}],
+                "sys", 60.0, transport_cfg, [], a1_config=cfg,
+                artifact_dir=self.tmp, turn_number=0,
+            )
+        self.assertEqual(out, ("OK", "end_turn", False))
+        self.assertEqual(len(calls), 2)
+
+    def test_bridge_does_not_retry_nonretryable_model_identity_failure(self):
+        cfg = _make_native_surface_config(self.tmp)
+        calls = []
+        def fake_cli(*args):
+            calls.append(1)
+            return "", "MODEL_IDENTITY_FAIL", True
+        transport_cfg = {"transport_policy": {"max_attempts_per_turn": 3, "backoff_seconds": [0, 0]}}
+        with patch.object(bridge, "_relay_claude_code_cli", side_effect=fake_cli):
+            out = bridge.a1_call_surface(
+                "claude-sonnet-4-6", [{"role": "user", "content": "x"}],
+                "sys", 60.0, transport_cfg, [], a1_config=cfg,
+                artifact_dir=self.tmp, turn_number=0,
+            )
+        self.assertEqual(out, ("", "MODEL_IDENTITY_FAIL", True))
+        self.assertEqual(len(calls), 1)
+
+    def test_claude_stream_json_verifies_model_and_empty_tools(self):
+        """Claude relay trusts provider init metadata, not only the requested --model flag."""
+        inp = os.path.join(self.tmp, "surface.txt")
+        with open(inp, "w", encoding="utf-8") as f:
+            f.write("hello")
+        sc = _make_native_surface_config(self.tmp)["surfaces"]["primary"]
+        sc["executable_path"] = "/bin/echo"
+        sc["allowed_model_labels"] = ["claude-sonnet-4-6"]
+        stdout = "\n".join([
+            json.dumps({"type":"system","subtype":"init","model":"claude-sonnet-4-6","tools":[],"mcp_servers":[],"permissionMode":"default","cwd":"/tmp/x"}),
+            json.dumps({"type":"assistant","message":{"model":"claude-sonnet-4-6","stop_reason":"end_turn"},"session_id":"s"}),
+            json.dumps({"type":"result","subtype":"success","is_error":False,"result":"OK","session_id":"s"}),
+        ])
+        fake = MagicMock(returncode=0, stdout=stdout, stderr="")
+        tr = []
+        with patch.object(bridge.subprocess, "run", return_value=fake) as run:
+            out = bridge._relay_claude_code_cli(inp, sc, "SYS", 60.0, tr)
+        self.assertEqual(out, ("OK", "end_turn", False))
+        kwargs = run.call_args.kwargs
+        self.assertTrue(os.path.basename(kwargs["cwd"]).startswith("representation_lifting_a1_"))
+        self.assertTrue(any(e.get("event") == "a1_bridge_cli_init" and e.get("model_returned") == "claude-sonnet-4-6" for e in tr))
+
+    def test_claude_stream_json_rejects_model_mismatch(self):
+        inp = os.path.join(self.tmp, "surface.txt")
+        with open(inp, "w", encoding="utf-8") as f:
+            f.write("hello")
+        sc = _make_native_surface_config(self.tmp)["surfaces"]["primary"]
+        sc["executable_path"] = "/bin/echo"
+        sc["allowed_model_labels"] = ["claude-sonnet-4-6"]
+        stdout = "\n".join([
+            json.dumps({"type":"system","subtype":"init","model":"other-model","tools":[],"mcp_servers":[],"permissionMode":"default","cwd":"/tmp/x"}),
+            json.dumps({"type":"result","subtype":"success","is_error":False,"result":"OK"}),
+        ])
+        fake = MagicMock(returncode=0, stdout=stdout, stderr="")
+        with patch.object(bridge.subprocess, "run", return_value=fake):
+            out = bridge._relay_claude_code_cli(inp, sc, "SYS", 60.0, [])
+        self.assertEqual(out, ("", "MODEL_IDENTITY_FAIL", True))
+
     # ------------------------------------------------------------------
     # 14. Frozen harness SHA-256 unchanged
     # ------------------------------------------------------------------

@@ -43,6 +43,7 @@ import hashlib
 import subprocess
 import time
 import shutil
+import tempfile
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -149,6 +150,31 @@ def _flatten_for_no_system_role(system_prompt: str, messages: list, scheme: dict
     return "\n".join(parts)
 
 
+def _flatten_history_for_native_system(messages: list, scheme: dict) -> str:
+    """Preserve the frozen message history when the surface gets system_prompt natively
+    but each bridge call is a fresh stateless CLI invocation.
+    """
+    if not messages:
+        return ""
+    if len(messages) == 1:
+        return messages[0]["content"]
+
+    hist_start = scheme.get("history_delimiter_start", "=== CONVERSATION HISTORY ===")
+    turn_fmt = scheme.get("history_turn_format", "[Turn {n} - {ROLE}]:")
+    hist_end = scheme.get("history_delimiter_end", "=== END CONVERSATION HISTORY ===")
+    current_delim = scheme.get("current_delimiter", "=== CURRENT REQUEST ===")
+
+    parts = [hist_start, ""]
+    turn_idx = 1
+    for msg in messages[:-1]:
+        role_label = "USER" if msg["role"] == "user" else "ASSISTANT"
+        parts += [turn_fmt.format(n=turn_idx, ROLE=role_label), msg["content"], ""]
+        if msg["role"] == "assistant":
+            turn_idx += 1
+    parts += [hist_end, "", current_delim, "", messages[-1]["content"]]
+    return "\n".join(parts)
+
+
 def emit_surface_input(
     artifact_dir: str, turn_number: int, system_prompt: str,
     messages: list, surface_config: dict,
@@ -159,8 +185,13 @@ def emit_surface_input(
     system_role_handling = surface_config.get("system_role_handling", "NATIVE_SYSTEM_MESSAGE")
 
     if system_role_handling == "NATIVE_SYSTEM_MESSAGE":
-        current_msg = messages[-1] if messages else {"content": ""}
-        surface_text = current_msg["content"]
+        history_handling = surface_config.get("message_history_handling", "NATIVE_MULTI_TURN")
+        if history_handling == "DEGRADED_HISTORY_FLATTENED_TO_USER_CONTENT":
+            scheme = surface_config.get("flattening_scheme", {})
+            surface_text = _flatten_history_for_native_system(messages, scheme)
+        else:
+            current_msg = messages[-1] if messages else {"content": ""}
+            surface_text = current_msg["content"]
     else:
         scheme = surface_config.get("flattening_scheme", {})
         surface_text = _flatten_for_no_system_role(system_prompt, messages, scheme)
@@ -221,8 +252,9 @@ def _relay_claude_code_cli(
     remaining_wallclock: float,
     transcript: list,
 ) -> tuple:
-    """Invoke Claude Code CLI with pinned flags. Returns (response_text, stop_reason, is_infra_failure)."""
+    """Invoke Claude Code in isolated print mode and verify the provider-reported model."""
     pinned_model = surface_config.get("pinned_model_id", "claude-sonnet-4-6")
+    allowed_labels = set(surface_config.get("allowed_model_labels", [pinned_model]))
     effort = surface_config.get("inference_controls_pinned", {}).get("reasoning_effort", "high")
     if effort in ("NOT_EXPOSED", "N/A", None):
         effort = "high"
@@ -246,24 +278,98 @@ def _relay_claude_code_cli(
         "--tools", "",
         "--system-prompt", system_prompt,
         "--print",
+        "--output-format", "stream-json",
+        "--verbose",
+        "--no-session-persistence",
+        "--max-turns", "1",
         user_content,
     ]
     transcript.append({
         "event": "a1_bridge_cli_invocation",
-        "model": pinned_model,
+        "model_requested": pinned_model,
         "effort": effort,
         "timeout_seconds": round(timeout, 1),
     })
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        with tempfile.TemporaryDirectory(prefix="representation_lifting_a1_") as clean_cwd:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=timeout, cwd=clean_cwd
+            )
         if result.returncode != 0 and not result.stdout.strip():
             transcript.append({"event": "a1_bridge_cli_error",
                 "returncode": result.returncode, "stderr": result.stderr[:500]})
             return "", None, True
-        response_text = result.stdout
-        transcript.append({"event": "a1_bridge_cli_success",
-            "returncode": result.returncode, "response_length": len(response_text)})
-        return response_text, "end_turn", False
+
+        init_event = None
+        result_event = None
+        assistant_stop_reason = None
+        assistant_model = None
+        for raw_line in result.stdout.splitlines():
+            if not raw_line.strip():
+                continue
+            try:
+                event = json.loads(raw_line)
+            except json.JSONDecodeError:
+                transcript.append({"event": "a1_bridge_cli_non_json_output", "text": raw_line[:500]})
+                continue
+            if event.get("type") == "system" and event.get("subtype") == "init":
+                init_event = event
+            elif event.get("type") == "assistant":
+                msg = event.get("message", {}) or {}
+                assistant_stop_reason = msg.get("stop_reason") or assistant_stop_reason
+                assistant_model = msg.get("model") or assistant_model
+            elif event.get("type") == "result":
+                result_event = event
+
+        if init_event is None:
+            transcript.append({"event": "a1_bridge_cli_missing_init_event"})
+            return "", "SURFACE_PROTOCOL_FAIL", True
+        returned_model = init_event.get("model")
+        tools = init_event.get("tools", [])
+        mcp_servers = init_event.get("mcp_servers", [])
+        transcript.append({
+            "event": "a1_bridge_cli_init",
+            "model_returned": returned_model,
+            "tools": tools,
+            "mcp_servers": mcp_servers,
+            "permission_mode": init_event.get("permissionMode"),
+            "cwd": init_event.get("cwd"),
+        })
+        if returned_model not in allowed_labels:
+            transcript.append({
+                "event": "a1_bridge_model_id_mismatch",
+                "expected_allowed": sorted(allowed_labels),
+                "returned": returned_model,
+            })
+            return "", "MODEL_IDENTITY_FAIL", True
+        if assistant_model is not None and assistant_model not in allowed_labels:
+            transcript.append({
+                "event": "a1_bridge_assistant_model_id_mismatch",
+                "expected_allowed": sorted(allowed_labels),
+                "returned": assistant_model,
+            })
+            return "", "MODEL_IDENTITY_FAIL", True
+        if tools:
+            transcript.append({"event": "a1_bridge_unexpected_tools_exposed", "tools": tools})
+            return "", "UNAUTHORIZED_TOOL_EXPOSURE", True
+        if any(s.get("status") not in (None, "disabled") for s in mcp_servers):
+            transcript.append({"event": "a1_bridge_unexpected_mcp_exposure", "mcp_servers": mcp_servers})
+            return "", "UNAUTHORIZED_TOOL_EXPOSURE", True
+        if result_event is None or result_event.get("is_error"):
+            transcript.append({"event": "a1_bridge_cli_missing_or_error_result", "result": result_event})
+            return "", "SURFACE_PROTOCOL_FAIL", True
+
+        response_text = result_event.get("result", "")
+        stop_reason = assistant_stop_reason or "end_turn"
+        transcript.append({
+            "event": "a1_bridge_cli_success",
+            "returncode": result.returncode,
+            "response_length": len(response_text),
+            "model_returned": returned_model,
+            "assistant_model": assistant_model,
+            "stop_reason": stop_reason,
+        })
+        return response_text, stop_reason, False
     except subprocess.TimeoutExpired:
         transcript.append({"event": "a1_bridge_cli_timeout"})
         return "", None, True
@@ -392,26 +498,53 @@ def a1_call_surface(
     transcript.append({"event": "a1_bridge_surface_input_emitted",
         "path": si_path, "sha256": si_sha, "system_role_handling": sys_role_handling})
 
-    # 3. Relay to surface
+    # 3. Relay to surface, preserving the frozen transport retry budget.
     surface_type = surface_config.get("surface_type", "claude-code-cli")
-    if surface_type == "claude-code-cli":
-        response_text, stop_reason, infra_fail = _relay_claude_code_cli(
-            si_path, surface_config, system_prompt, remaining_wallclock, transcript
-        )
-    elif surface_type == "chatgpt-web":
-        resp_collect_path = os.path.join(
-            artifact_dir, "responses", f"response_{turn_number}.txt"
-        )
-        os.makedirs(os.path.dirname(resp_collect_path), exist_ok=True)
-        response_text, stop_reason, infra_fail = _relay_manual_chatgpt(
-            si_path, resp_collect_path, remaining_wallclock, transcript
-        )
-    else:
-        transcript.append({"event": "a1_bridge_unknown_surface_type", "type": surface_type})
-        return "", None, True
+    policy = config.get("transport_policy", {}) if isinstance(config, dict) else {}
+    max_attempts = int(policy.get("max_attempts_per_turn", 1))
+    backoffs = list(policy.get("backoff_seconds", []))
+    call_start = time.monotonic()
+    response_text, stop_reason, infra_fail = "", None, True
+
+    for attempt in range(1, max_attempts + 1):
+        elapsed = time.monotonic() - call_start
+        effective_remaining = remaining_wallclock - elapsed
+        if effective_remaining <= 1.0:
+            transcript.append({"event": "a1_bridge_wallclock_expired_during_retry", "attempt": attempt})
+            return "", "timeout_wallclock", False
+
+        transcript.append({"event": "a1_bridge_transport_attempt", "attempt": attempt})
+        if surface_type == "claude-code-cli":
+            response_text, stop_reason, infra_fail = _relay_claude_code_cli(
+                si_path, surface_config, system_prompt, effective_remaining, transcript
+            )
+        elif surface_type == "chatgpt-web":
+            resp_collect_path = os.path.join(
+                artifact_dir, "responses", f"response_{turn_number}.txt"
+            )
+            os.makedirs(os.path.dirname(resp_collect_path), exist_ok=True)
+            response_text, stop_reason, infra_fail = _relay_manual_chatgpt(
+                si_path, resp_collect_path, effective_remaining, transcript
+            )
+        else:
+            transcript.append({"event": "a1_bridge_unknown_surface_type", "type": surface_type})
+            return "", None, True
+
+        if not infra_fail:
+            break
+        # Non-empty stop_reason marks a delivered/protocol failure and is never retried.
+        # Only pre-response transport failures return infra_fail=True with stop_reason=None.
+        if stop_reason is not None:
+            transcript.append({"event": "a1_bridge_nonretryable_infra", "attempt": attempt, "reason": stop_reason})
+            return "", stop_reason, True
+        if attempt < max_attempts:
+            wait_time = backoffs[attempt - 1] if attempt - 1 < len(backoffs) else 0
+            transcript.append({"event": "a1_bridge_transport_retry", "attempt": attempt, "backoff_seconds": wait_time})
+            if wait_time > 0:
+                time.sleep(wait_time)
 
     if infra_fail:
-        transcript.append({"event": "a1_bridge_infra_failure"})
+        transcript.append({"event": "a1_bridge_infra_failure", "attempts": max_attempts})
         return "", None, True
 
     # 4. Emit response artifact — always, even if response_text is empty
