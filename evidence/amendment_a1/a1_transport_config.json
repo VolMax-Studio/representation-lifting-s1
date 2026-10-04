@@ -4,14 +4,15 @@
   "supersedes_transport_in": "tools/executor_config.json",
   "frozen_executor_config_sha256": "395deb97fa2b038a93ce416ced4ce3bcba31cddea30db7f3daa5ee5bc01f4b04",
   "frozen_executor_harness_sha256": "ccb1cad202fcdd2dbd931c3b8c5d65d9d368a0bdb26da8946e9b8671b07d8c48",
-  "bridge_sha256": "d9de4e4575848646ad2ad42e3288801fc6975254c6cd9e7d7cda80357f10eb67",
-  "bridge_tests_sha256": "f28f29f1b38f5c358ec41a0a94e6c28745b3cea933cead929611eabfbdd1ee8d",
+  "bridge_sha256": "a18ebd053a6ce8a0d257b76ff0d64bf73d17227558c0296ae36ae425f8e14285",
+  "bridge_tests_sha256": "e345a5802492de69c49765e730f920dac3430b1b5a50cc705ea8abb1be78438d",
   "reconnaissance_timestamp_utc": "2026-10-03T06:51:50Z",
   "surfaces": {
     "primary": {
       "pinned_model_id": "claude-sonnet-4-6",
       "surface_type": "claude-code-cli",
       "surface_version": "2.1.197 (Claude Code)",
+      "plan_tier": "Pro",
       "executable_path": "/home/volmax-studio/.npm-global/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe",
       "surface_binary_sha256": "f54e69cbc89b2da61a415700af7ff52a147e862517d4f1b0eecf768448cf7f83",
       "frozen_api_endpoint": "https://api.anthropic.com/v1/messages",
@@ -47,6 +48,7 @@
       "pinned_model_id": "gpt-5.6-sol",
       "surface_type": "chatgpt-web",
       "surface_version_observed": "NOT_RECONNOITERED__REPLICATION_DEFERRED",
+      "plan_tier": "Plus (OpenAI Subscription) -- REPLICATION_DEFERRED",
       "frozen_api_endpoint": "https://api.openai.com/v1/chat/completions",
       "frozen_api_endpoint_status": "NOT_USED_UNDER_A1",
       "allowed_model_labels": [],
@@ -88,8 +90,8 @@
   ],
   "fields_requiring_ivan_reconnaissance": [],
   "status": "PRIMARY_READY_FOR_REVIEW__REPLICATION_NOT_EVALUABLE_INFRA_DEFERRED",
-  "bridge_activate_sha256": "5a100b1f8c142e9cb2b8a94a56c30a9a2a7c14d2e849b67d60b56d26ae32daec",
+  "bridge_activate_sha256": "a23581ff50f6903c5211669923aebaaaadf2641f3926348f94ba98af0b7279fb",
   "target_preparer_sha256": "e432a9442edd1b4407d4da316447ace4b7c19bad744241f0cf7a144354f53f41",
   "target_preparer_tests_sha256": "500b50842c809e597f6553deaa8825fddc17958fe1eb16c9df6672eaba32d870",
-  "amendment_text_sha256": "bef3169b259b802fe491a565a8390c4776b7876200b489af76ea4bb016b77ead"
+  "amendment_text_sha256": "466b1a57a6987e496a9e32ae219a615107cb132bde04e773614280de6607d52e"
 }

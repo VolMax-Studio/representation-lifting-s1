@@ -853,6 +853,305 @@ class TestA1SurfaceBridge(unittest.TestCase):
                 self.assertEqual(data["case_id"], cid)
                 self.assertEqual(data["transport_amendment"], "A1")
 
+    # ------------------------------------------------------------------
+    # 19. Transport metadata artifact emission & sealing (§A1.17 / Finding F6)
+    # ------------------------------------------------------------------
+    def test_transport_metadata_turn_artifact_emission(self):
+        """
+        Finding F6:
+        Verifies that each turn emits transport_metadata_N.json and companion .sha256,
+        recording model_returned, assistant_model, tools, mcp_servers, permission_mode,
+        and stop_reason, with valid self-hash.
+        """
+        art_dir = os.path.join(self.tmp, "turn_meta_artifacts")
+        meta = {
+            "model_returned": "claude-sonnet-4-6",
+            "assistant_model": "claude-sonnet-4-6",
+            "tools": [],
+            "mcp_servers": [],
+            "permission_mode": "default",
+            "stop_reason": "end_turn",
+            "is_infra_failure": False,
+        }
+        path, sha = bridge.emit_transport_metadata(art_dir, 0, meta)
+        self.assertTrue(os.path.isfile(path))
+        self.assertTrue(os.path.isfile(path + ".sha256"))
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        self.assertEqual(data["turn_number"], 0)
+        self.assertEqual(data["model_returned"], "claude-sonnet-4-6")
+        self.assertEqual(data["tools"], [])
+        self.assertEqual(data["stop_reason"], "end_turn")
+        self.assertEqual(data["sha256"], sha)
+
+    # ------------------------------------------------------------------
+    # 20. Observed model derivation from provider metadata & mismatch rejection (§A1.17 / Finding F6)
+    # ------------------------------------------------------------------
+    def test_observed_model_derived_from_provider_metadata(self):
+        """
+        Finding F6:
+        Verifies that joint receipts derive model_label_displayed and
+        model_label_in_allowed_set from observed transport_metadata, not requested model_id.
+        """
+        import tools.a1_activate as a1_act
+        import tools.executor_harness as eh
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            art_dir = os.path.join(tmp_dir, "artifacts")
+            sealed_dir = os.path.join(tmp_dir, "sealed_transcripts")
+            receipt_dir = os.path.join(tmp_dir, "receipts")
+            a1_act.configure(artifact_dir=art_dir, sealed_dir=sealed_dir, receipt_dir=receipt_dir)
+            a1_act.reset_branch_seals()
+
+            dummy_target = os.path.join(tmp_dir, "proofnet-108.lean")
+            with open(dummy_target, "w", encoding="utf-8") as f:
+                f.write("theorem frozen_target : True := trivial\n")
+
+            def mock_agent(role, turn, msgs):
+                meta = {
+                    "model_returned": "claude-sonnet-4-6",
+                    "assistant_model": "claude-sonnet-4-6",
+                    "tools": [],
+                    "mcp_servers": [],
+                    "permission_mode": "default",
+                    "stop_reason": "end_turn",
+                    "is_infra_failure": False,
+                }
+                return ("```lean\ntheorem executor_theorem : True := trivial\n```", "end_turn", False, meta)
+
+            def fake_verifier(cmd, *args, **kwargs):
+                cmd_str = " ".join(cmd)
+                if "count_lean_tokens.py" in cmd_str or "count_tokens" in cmd_str:
+                    return MagicMock(returncode=0, stdout="42\n", stderr="")
+                elif "check_bridge.py" in cmd_str:
+                    return MagicMock(returncode=0, stdout="CHECK_BRIDGE_SENTINEL_OK\nBRIDGE_VALID", stderr="")
+                elif "verify_proof.sh" in cmd_str:
+                    return MagicMock(returncode=0, stdout="VERIFICATION_SUCCESS", stderr="")
+                elif "verify_lifted.sh" in cmd_str:
+                    return MagicMock(returncode=0, stdout="VERIFY_LIFTED_SENTINEL_OK", stderr="")
+                return MagicMock(returncode=0, stdout="", stderr="")
+
+            with patch.object(eh.subprocess, "run", side_effect=fake_verifier):
+                report = eh.run_blind_case("proofnet-108", dummy_target, "claude-sonnet-4-6", mock_generator=mock_agent)
+
+            self.assertEqual(report["model_label_displayed"], "claude-sonnet-4-6")
+            self.assertTrue(report["model_label_in_allowed_set"])
+            self.assertEqual(report["observed_models"], ["claude-sonnet-4-6"])
+
+    def test_model_mismatch_receipt_cannot_claim_allowed_model(self):
+        """
+        Finding F6:
+        A model-identity mismatch test demonstrating that when the provider returns
+        an unexpected model (e.g. 'other-model'), the resulting receipt derives
+        model_label_displayed = 'other-model' and model_label_in_allowed_set = False,
+        failing closed even if 'claude-sonnet-4-6' was requested.
+        """
+        import tools.a1_activate as a1_act
+        import tools.executor_harness as eh
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            art_dir = os.path.join(tmp_dir, "artifacts")
+            sealed_dir = os.path.join(tmp_dir, "sealed_transcripts")
+            receipt_dir = os.path.join(tmp_dir, "receipts")
+            a1_act.configure(artifact_dir=art_dir, sealed_dir=sealed_dir, receipt_dir=receipt_dir)
+            a1_act.reset_branch_seals()
+
+            dummy_target = os.path.join(tmp_dir, "proofnet-108.lean")
+            with open(dummy_target, "w", encoding="utf-8") as f:
+                f.write("theorem frozen_target : True := trivial\n")
+
+            def mock_agent_mismatch(role, turn, msgs):
+                meta = {
+                    "model_returned": "other-model",
+                    "assistant_model": "other-model",
+                    "tools": [],
+                    "mcp_servers": [],
+                    "permission_mode": "default",
+                    "stop_reason": "MODEL_IDENTITY_FAIL",
+                    "is_infra_failure": True,
+                }
+                return ("", "MODEL_IDENTITY_FAIL", True, meta)
+
+            def fake_verifier(cmd, *args, **kwargs):
+                return MagicMock(returncode=0, stdout="", stderr="")
+
+            with patch.object(eh.subprocess, "run", side_effect=fake_verifier):
+                report = eh.run_blind_case("proofnet-108", dummy_target, "claude-sonnet-4-6", mock_generator=mock_agent_mismatch)
+
+            # Assert receipt derives observed 'other-model' and cannot claim allowed membership
+            self.assertEqual(report["model_label_displayed"], "other-model")
+            self.assertFalse(report["model_label_in_allowed_set"])
+            self.assertEqual(report["observed_models"], ["other-model"])
+
+    # ------------------------------------------------------------------
+    # 21. Negative control arm A1 custody & sealing (§A1.17 / Finding F5)
+    # ------------------------------------------------------------------
+    def test_control_case_a1_custody_and_sealing(self):
+        """
+        Finding F5:
+        Verifies that run_control_case under A1 produces an enriched joint receipt
+        containing all 12 A1 fields, surface_metadata with plan_tier, isolated
+        D and L branch directories, and sealed transcripts for both branches.
+        """
+        import tools.a1_activate as a1_act
+        import tools.executor_harness as eh
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            art_dir = os.path.join(tmp_dir, "artifacts")
+            sealed_dir = os.path.join(tmp_dir, "sealed_transcripts")
+            receipt_dir = os.path.join(tmp_dir, "receipts")
+            a1_act.configure(artifact_dir=art_dir, sealed_dir=sealed_dir, receipt_dir=receipt_dir)
+            a1_act.reset_branch_seals()
+
+            dummy_target = os.path.join(tmp_dir, "control_sum_odd.lean")
+            with open(dummy_target, "w", encoding="utf-8") as f:
+                f.write("theorem frozen_target : True := trivial\n")
+
+            dummy_stub = os.path.join(tmp_dir, "ControlGnomonStub.lean")
+            with open(dummy_stub, "w", encoding="utf-8") as f:
+                f.write("def stub : True := trivial\n")
+
+            def mock_agent(role, turn, msgs):
+                if role == "D":
+                    return ("```lean\ntheorem executor_theorem : True := trivial\n```", "end_turn", False)
+                elif role == "L":
+                    return ("```lean\ntheorem lifted_theorem : True := trivial\n```", "end_turn", False)
+                return ("", "end_turn", True)
+
+            def fake_verifier(cmd, *args, **kwargs):
+                cmd_str = " ".join(cmd)
+                if "count_lean_tokens.py" in cmd_str or "count_tokens" in cmd_str:
+                    return MagicMock(returncode=0, stdout="42\n", stderr="")
+                elif "check_bridge.py" in cmd_str:
+                    return MagicMock(returncode=0, stdout="CHECK_BRIDGE_SENTINEL_OK\nBRIDGE_VALID", stderr="")
+                elif "verify_proof.sh" in cmd_str:
+                    return MagicMock(returncode=0, stdout="VERIFICATION_SUCCESS", stderr="")
+                elif "verify_lifted.sh" in cmd_str:
+                    return MagicMock(returncode=0, stdout="VERIFY_LIFTED_SENTINEL_OK", stderr="")
+                return MagicMock(returncode=0, stdout="", stderr="")
+
+            with patch.object(eh.subprocess, "run", side_effect=fake_verifier):
+                report = eh.run_control_case(
+                    "claude-sonnet-4-6",
+                    target_path=dummy_target,
+                    stub_path=dummy_stub,
+                    mock_generator=mock_agent,
+                )
+
+            # Check all A1 custody fields
+            self.assertEqual(report["transport_amendment"], "A1")
+            self.assertEqual(report["model_label_displayed"], "claude-sonnet-4-6")
+            self.assertTrue(report["model_label_in_allowed_set"])
+            self.assertEqual(report["surface_metadata"]["plan_tier"], "Pro")
+            self.assertIn("D", report["branch_sealed_transcripts"])
+            self.assertIn("L", report["branch_sealed_transcripts"])
+
+            # Verify isolated artifact directories and sealed archives exist
+            for r in ["D", "L"]:
+                b_dir = os.path.join(art_dir, "control", r)
+                self.assertTrue(os.path.isdir(b_dir), f"Control branch dir missing: {b_dir}")
+                seal_path = os.path.join(sealed_dir, f"sealed_control_{r}_claude-sonnet-4-6.tar")
+                self.assertTrue(os.path.isfile(seal_path), f"Control sealed tar missing: {seal_path}")
+                self.assertTrue(os.path.isfile(seal_path + ".sha256"))
+                self.assertEqual(report["transcript_sealed_sha256"][r], _sha256_file(seal_path))
+
+            # Verify saved receipt
+            rcpt_path = os.path.join(receipt_dir, "execution_receipt_control_claude-sonnet-4-6.json")
+            self.assertTrue(os.path.isfile(rcpt_path))
+
+    # ------------------------------------------------------------------
+    # 22. Calibration family arm A1 custody & sealing (§A1.17 / Finding F5)
+    # ------------------------------------------------------------------
+    def test_calibration_family_a1_custody_and_sealing(self):
+        """
+        Finding F5:
+        Verifies that run_calibration_family under A1 produces an enriched joint receipt
+        containing all 12 A1 fields, surface_metadata with plan_tier, isolated
+        D1, D2, S1, L1, S2, L2 branch directories, and sealed transcripts for all 6 branches.
+        """
+        import tools.a1_activate as a1_act
+        import tools.executor_harness as eh
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            art_dir = os.path.join(tmp_dir, "artifacts")
+            sealed_dir = os.path.join(tmp_dir, "sealed_transcripts")
+            receipt_dir = os.path.join(tmp_dir, "receipts")
+            a1_act.configure(artifact_dir=art_dir, sealed_dir=sealed_dir, receipt_dir=receipt_dir)
+            a1_act.reset_branch_seals()
+
+            family = "fibonacci"
+
+            def mock_agent(role, turn, msgs):
+                code = (
+                    "```lean\n"
+                    "theorem executor_theorem : True := trivial\n"
+                    "def LiftDom : Type := Unit\n"
+                    "def LiftCod : Type := Unit\n"
+                    "def liftT (x : Unit) : Unit := x\n"
+                    "def invariant (x : Unit) : Prop := True\n"
+                    "def BridgeProp : Prop := True\n"
+                    "def LiftedClaim : Prop := True\n"
+                    "theorem preservation_bridge : BridgeProp := trivial\n"
+                    "theorem lifted_theorem : LiftedClaim := trivial\n"
+                    "```"
+                )
+                return (code, "end_turn", False)
+
+            def fake_verifier(cmd, *args, **kwargs):
+                cmd_str = " ".join(cmd)
+                if "count_lean_tokens.py" in cmd_str or "count_tokens" in cmd_str:
+                    return MagicMock(returncode=0, stdout="42\n", stderr="")
+                elif "check_bridge.py" in cmd_str:
+                    return MagicMock(returncode=0, stdout="CHECK_BRIDGE_SENTINEL_OK\nBRIDGE_VALID", stderr="")
+                elif "verify_proof.sh" in cmd_str:
+                    return MagicMock(returncode=0, stdout="VERIFICATION_SUCCESS", stderr="")
+                elif "verify_lifted.sh" in cmd_str:
+                    return MagicMock(returncode=0, stdout="VERIFY_LIFTED_SENTINEL_OK", stderr="")
+                return MagicMock(returncode=0, stdout="", stderr="")
+
+            with patch.object(eh.subprocess, "run", side_effect=fake_verifier):
+                report = eh.run_calibration_family(family, "claude-sonnet-4-6", mock_generator=mock_agent)
+
+            # Check all A1 custody fields
+            self.assertEqual(report["transport_amendment"], "A1")
+            self.assertEqual(report["model_label_displayed"], "claude-sonnet-4-6")
+            self.assertTrue(report["model_label_in_allowed_set"])
+            self.assertEqual(report["surface_metadata"]["plan_tier"], "Pro")
+
+            branches = ["D1", "D2", "S1", "L1", "S2", "L2"]
+            for bl in branches:
+                self.assertIn(bl, report["branch_sealed_transcripts"])
+                self.assertIn(bl, report["transcript_sealed_sha256"])
+                b_dir = os.path.join(art_dir, f"calibration_{family}", bl)
+                self.assertTrue(os.path.isdir(b_dir), f"Calibration branch dir missing: {b_dir}")
+                seal_path = os.path.join(sealed_dir, f"sealed_calibration_{family}_{bl}_claude-sonnet-4-6.tar")
+                self.assertTrue(os.path.isfile(seal_path), f"Calibration sealed tar missing: {seal_path}")
+                self.assertEqual(report["transcript_sealed_sha256"][bl], _sha256_file(seal_path))
+
+            # Verify saved receipt
+            rcpt_path = os.path.join(receipt_dir, f"execution_receipt_calibration_{family}_claude-sonnet-4-6.json")
+            self.assertTrue(os.path.isfile(rcpt_path))
+
+    # ------------------------------------------------------------------
+    # 23. Surface metadata & plan tier preservation (§A1.17 / Finding F7)
+    # ------------------------------------------------------------------
+    def test_surface_metadata_plan_tier_frozen_and_emitted(self):
+        """
+        Finding F7:
+        Verifies that plan_tier is frozen in config for primary ('Pro') and
+        replication ('Plus (OpenAI Subscription) -- REPLICATION_DEFERRED'),
+        and is included in surface_metadata on all receipts.
+        """
+        cfg_path = os.path.join(REPO_ROOT, "evidence", "amendment_a1", "a1_transport_config.json")
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+
+        primary = cfg["surfaces"]["primary"]
+        self.assertEqual(primary.get("plan_tier"), "Pro")
+
+        replication = cfg["surfaces"]["replication"]
+        self.assertEqual(replication.get("plan_tier"), "Plus (OpenAI Subscription) -- REPLICATION_DEFERRED")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

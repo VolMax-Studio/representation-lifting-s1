@@ -223,6 +223,33 @@ def emit_response(artifact_dir: str, turn_number: int, response_text: str) -> tu
 
 
 # ---------------------------------------------------------------------------
+# Transport metadata artifact (§A1.17 / Finding F6)
+# ---------------------------------------------------------------------------
+
+def emit_transport_metadata(
+    artifact_dir: str, turn_number: int, metadata: dict
+) -> tuple:
+    """Write transport_metadata/transport_metadata_N.json and .sha256. Returns (path, sha256)."""
+    meta_dir = os.path.join(artifact_dir, "transport_metadata")
+    os.makedirs(meta_dir, exist_ok=True)
+    path = os.path.join(meta_dir, f"transport_metadata_{turn_number}.json")
+    envelope = {
+        "schema_version": "representation-lifting-a1-transport-metadata/v1",
+        "turn_number": turn_number,
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        **metadata,
+    }
+    canonical_bytes = json.dumps(envelope, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    sha = _sha256_bytes(canonical_bytes)
+    envelope["sha256"] = sha
+    with open(path, "wb") as f:
+        f.write(json.dumps(envelope, indent=2, ensure_ascii=False).encode("utf-8") + b"\n")
+    with open(path + ".sha256", "w", encoding="utf-8") as f:
+        f.write(f"{sha}  {os.path.basename(path)}\n")
+    return path, sha
+
+
+# ---------------------------------------------------------------------------
 # Transport failure classification
 # ---------------------------------------------------------------------------
 
@@ -298,6 +325,18 @@ def _relay_claude_code_cli(
         if result.returncode != 0 and not result.stdout.strip():
             transcript.append({"event": "a1_bridge_cli_error",
                 "returncode": result.returncode, "stderr": result.stderr[:500]})
+            transcript.append({
+                "event": "a1_bridge_transport_metadata",
+                "metadata": {
+                    "model_returned": None,
+                    "assistant_model": None,
+                    "tools": [],
+                    "mcp_servers": [],
+                    "permission_mode": None,
+                    "stop_reason": "CLI_ERROR",
+                    "is_infra_failure": True,
+                },
+            })
             return "", None, True
 
         init_event = None
@@ -323,6 +362,18 @@ def _relay_claude_code_cli(
 
         if init_event is None:
             transcript.append({"event": "a1_bridge_cli_missing_init_event"})
+            transcript.append({
+                "event": "a1_bridge_transport_metadata",
+                "metadata": {
+                    "model_returned": None,
+                    "assistant_model": None,
+                    "tools": [],
+                    "mcp_servers": [],
+                    "permission_mode": None,
+                    "stop_reason": "SURFACE_PROTOCOL_FAIL",
+                    "is_infra_failure": True,
+                },
+            })
             return "", "SURFACE_PROTOCOL_FAIL", True
         returned_model = init_event.get("model")
         tools = init_event.get("tools", [])
@@ -341,6 +392,18 @@ def _relay_claude_code_cli(
                 "expected_allowed": sorted(allowed_labels),
                 "returned": returned_model,
             })
+            transcript.append({
+                "event": "a1_bridge_transport_metadata",
+                "metadata": {
+                    "model_returned": returned_model,
+                    "assistant_model": assistant_model,
+                    "tools": tools,
+                    "mcp_servers": mcp_servers,
+                    "permission_mode": init_event.get("permissionMode"),
+                    "stop_reason": "MODEL_IDENTITY_FAIL",
+                    "is_infra_failure": True,
+                },
+            })
             return "", "MODEL_IDENTITY_FAIL", True
         if assistant_model is not None and assistant_model not in allowed_labels:
             transcript.append({
@@ -348,15 +411,63 @@ def _relay_claude_code_cli(
                 "expected_allowed": sorted(allowed_labels),
                 "returned": assistant_model,
             })
+            transcript.append({
+                "event": "a1_bridge_transport_metadata",
+                "metadata": {
+                    "model_returned": returned_model,
+                    "assistant_model": assistant_model,
+                    "tools": tools,
+                    "mcp_servers": mcp_servers,
+                    "permission_mode": init_event.get("permissionMode"),
+                    "stop_reason": "MODEL_IDENTITY_FAIL",
+                    "is_infra_failure": True,
+                },
+            })
             return "", "MODEL_IDENTITY_FAIL", True
         if tools:
             transcript.append({"event": "a1_bridge_unexpected_tools_exposed", "tools": tools})
+            transcript.append({
+                "event": "a1_bridge_transport_metadata",
+                "metadata": {
+                    "model_returned": returned_model,
+                    "assistant_model": assistant_model,
+                    "tools": tools,
+                    "mcp_servers": mcp_servers,
+                    "permission_mode": init_event.get("permissionMode"),
+                    "stop_reason": "UNAUTHORIZED_TOOL_EXPOSURE",
+                    "is_infra_failure": True,
+                },
+            })
             return "", "UNAUTHORIZED_TOOL_EXPOSURE", True
         if any(s.get("status") not in (None, "disabled") for s in mcp_servers):
             transcript.append({"event": "a1_bridge_unexpected_mcp_exposure", "mcp_servers": mcp_servers})
+            transcript.append({
+                "event": "a1_bridge_transport_metadata",
+                "metadata": {
+                    "model_returned": returned_model,
+                    "assistant_model": assistant_model,
+                    "tools": tools,
+                    "mcp_servers": mcp_servers,
+                    "permission_mode": init_event.get("permissionMode"),
+                    "stop_reason": "UNAUTHORIZED_TOOL_EXPOSURE",
+                    "is_infra_failure": True,
+                },
+            })
             return "", "UNAUTHORIZED_TOOL_EXPOSURE", True
         if result_event is None or result_event.get("is_error"):
             transcript.append({"event": "a1_bridge_cli_missing_or_error_result", "result": result_event})
+            transcript.append({
+                "event": "a1_bridge_transport_metadata",
+                "metadata": {
+                    "model_returned": returned_model,
+                    "assistant_model": assistant_model,
+                    "tools": tools,
+                    "mcp_servers": mcp_servers,
+                    "permission_mode": init_event.get("permissionMode"),
+                    "stop_reason": "SURFACE_PROTOCOL_FAIL",
+                    "is_infra_failure": True,
+                },
+            })
             return "", "SURFACE_PROTOCOL_FAIL", True
 
         response_text = result_event.get("result", "")
@@ -369,12 +480,48 @@ def _relay_claude_code_cli(
             "assistant_model": assistant_model,
             "stop_reason": stop_reason,
         })
+        transcript.append({
+            "event": "a1_bridge_transport_metadata",
+            "metadata": {
+                "model_returned": returned_model,
+                "assistant_model": assistant_model,
+                "tools": tools,
+                "mcp_servers": mcp_servers,
+                "permission_mode": init_event.get("permissionMode"),
+                "stop_reason": stop_reason,
+                "is_infra_failure": False,
+            },
+        })
         return response_text, stop_reason, False
     except subprocess.TimeoutExpired:
         transcript.append({"event": "a1_bridge_cli_timeout"})
+        transcript.append({
+            "event": "a1_bridge_transport_metadata",
+            "metadata": {
+                "model_returned": None,
+                "assistant_model": None,
+                "tools": [],
+                "mcp_servers": [],
+                "permission_mode": None,
+                "stop_reason": "TIMEOUT",
+                "is_infra_failure": True,
+            },
+        })
         return "", None, True
     except (FileNotFoundError, OSError) as exc:
         transcript.append({"event": "a1_bridge_cli_not_found", "error": str(exc)})
+        transcript.append({
+            "event": "a1_bridge_transport_metadata",
+            "metadata": {
+                "model_returned": None,
+                "assistant_model": None,
+                "tools": [],
+                "mcp_servers": [],
+                "permission_mode": None,
+                "stop_reason": "CLI_NOT_FOUND",
+                "is_infra_failure": True,
+            },
+        })
         return "", None, True
 
 
@@ -429,6 +576,18 @@ def _relay_manual_chatgpt(
 
     if not os.path.isfile(response_collect_path):
         transcript.append({"event": "a1_bridge_manual_timeout"})
+        transcript.append({
+            "event": "a1_bridge_transport_metadata",
+            "metadata": {
+                "model_returned": None,
+                "assistant_model": None,
+                "tools": [],
+                "mcp_servers": [],
+                "permission_mode": "manual",
+                "stop_reason": "TIMEOUT",
+                "is_infra_failure": True,
+            },
+        })
         return "", None, True
 
     with open(response_collect_path, "r", encoding="utf-8") as f:
@@ -436,6 +595,18 @@ def _relay_manual_chatgpt(
     transcript.append({
         "event": "a1_bridge_manual_response_received",
         "response_length": len(response_text),
+    })
+    transcript.append({
+        "event": "a1_bridge_transport_metadata",
+        "metadata": {
+            "model_returned": "gpt-5.6-sol",
+            "assistant_model": "gpt-5.6-sol",
+            "tools": [],
+            "mcp_servers": [],
+            "permission_mode": "manual",
+            "stop_reason": "end_turn",
+            "is_infra_failure": False,
+        },
     })
     return response_text, "end_turn", False
 
@@ -519,6 +690,17 @@ def a1_call_surface(
         effective_remaining = remaining_wallclock - elapsed
         if effective_remaining <= 1.0:
             transcript.append({"event": "a1_bridge_wallclock_expired_during_retry", "attempt": attempt})
+            meta_dict = {
+                "model_returned": None,
+                "assistant_model": None,
+                "tools": [],
+                "mcp_servers": [],
+                "permission_mode": None,
+                "stop_reason": "timeout_wallclock",
+                "is_infra_failure": True,
+            }
+            if artifact_dir:
+                emit_transport_metadata(artifact_dir, turn_number, meta_dict)
             return "", "timeout_wallclock", False
 
         transcript.append({"event": "a1_bridge_transport_attempt", "attempt": attempt})
@@ -544,18 +726,42 @@ def a1_call_surface(
         # Only pre-response transport failures return infra_fail=True with stop_reason=None.
         if stop_reason is not None:
             transcript.append({"event": "a1_bridge_nonretryable_infra", "attempt": attempt, "reason": stop_reason})
-            return "", stop_reason, True
+            break
         if attempt < max_attempts:
             wait_time = backoffs[attempt - 1] if attempt - 1 < len(backoffs) else 0
             transcript.append({"event": "a1_bridge_transport_retry", "attempt": attempt, "backoff_seconds": wait_time})
             if wait_time > 0:
                 time.sleep(wait_time)
 
+    # 4. Resolve and emit transport metadata artifact (§A1.17 / Finding F6)
+    meta_dict = None
+    for ev in reversed(transcript):
+        if ev.get("event") == "a1_bridge_transport_metadata":
+            meta_dict = ev.get("metadata")
+            break
+    if meta_dict is None:
+        meta_dict = {
+            "model_returned": surface_config.get("pinned_model_id") if not infra_fail else None,
+            "assistant_model": surface_config.get("pinned_model_id") if not infra_fail else None,
+            "tools": [],
+            "mcp_servers": [],
+            "permission_mode": "default",
+            "stop_reason": stop_reason or ("end_turn" if not infra_fail else "INFRA_FAILURE"),
+            "is_infra_failure": bool(infra_fail),
+        }
+
+    meta_path, meta_sha = emit_transport_metadata(artifact_dir, turn_number, meta_dict)
+    transcript.append({
+        "event": "a1_bridge_transport_metadata_emitted",
+        "path": meta_path,
+        "sha256": meta_sha,
+    })
+
     if infra_fail:
         transcript.append({"event": "a1_bridge_infra_failure", "attempts": max_attempts})
-        return "", None, True
+        return "", stop_reason, True
 
-    # 4. Emit response artifact — always, even if response_text is empty
+    # 5. Emit response artifact — always, even if response_text is empty
     resp_path, resp_sha = emit_response(artifact_dir, turn_number, response_text)
     transcript.append({"event": "a1_bridge_response_emitted",
         "path": resp_path, "sha256": resp_sha, "response_length": len(response_text)})

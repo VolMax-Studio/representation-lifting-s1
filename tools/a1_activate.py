@@ -54,7 +54,15 @@ import functools
 from typing import Optional
 
 import tools.executor_harness as _harness
-from tools.a1_surface_bridge import a1_call_surface, _load_a1_config, _sha256_file
+from tools.a1_surface_bridge import (
+    a1_call_surface,
+    _load_a1_config,
+    _sha256_file,
+    emit_canonical_request,
+    emit_surface_input,
+    emit_response,
+    emit_transport_metadata,
+)
 
 # ---------------------------------------------------------------------------
 # Preserve original functions for test assertions & unwrapped operations
@@ -78,11 +86,12 @@ _RECEIPT_DIR: Optional[str] = None
 
 _CURRENT_CASE_ID: Optional[str] = None
 _CURRENT_ROLE: Optional[str] = None
+_CURRENT_BRANCH_LABEL: Optional[str] = None
 
 # Turn counter — keyed by (model_id, branch_artifact_dir)
 _turn_counter: dict = {}
 
-# Sealed branch transcripts — keyed by f"{case_id}::{role}"
+# Sealed branch transcripts — keyed by f"{case_id}::{branch_label}"
 _BRANCH_SEALS: dict = {}
 
 
@@ -205,8 +214,8 @@ def _build_patched_inference_fn():
 
         # Compute branch-isolated artifact directory
         case_id = _CURRENT_CASE_ID or "unspecified_case"
-        role = _CURRENT_ROLE or "unspecified_role"
-        branch_art_dir = os.path.join(base_dir, case_id, role)
+        branch_label = _CURRENT_BRANCH_LABEL or _CURRENT_ROLE or "unspecified_branch"
+        branch_art_dir = os.path.join(base_dir, case_id, branch_label)
         os.makedirs(branch_art_dir, exist_ok=True)
 
         turn_key = f"{model_id}::{branch_art_dir}"
@@ -234,29 +243,89 @@ def _build_patched_inference_fn():
 def _build_patched_sm_run():
     @functools.wraps(ORIGINAL_SM_RUN)
     def _wrapped_sm_run(self):
-        global _CURRENT_ROLE, _CURRENT_CASE_ID
+        global _CURRENT_ROLE, _CURRENT_CASE_ID, _CURRENT_BRANCH_LABEL
         role = self.role
         case_id = getattr(self, "_a1_case_id", None) or _CURRENT_CASE_ID
         if not case_id:
             # Derive case_id from target filename (e.g. proofnet-108.lean -> proofnet-108)
             case_id = os.path.splitext(os.path.basename(self.target_path))[0]
 
-        saved_role, saved_case = _CURRENT_ROLE, _CURRENT_CASE_ID
+        target_name = os.path.basename(self.target_path) if self.target_path else ""
+        if getattr(self, "_a1_branch_label", None):
+            branch_label = self._a1_branch_label
+        elif "_t1" in target_name:
+            branch_label = f"{role}1"
+        elif "_t2" in target_name:
+            branch_label = f"{role}2"
+        else:
+            branch_label = role
+
+        saved_role = _CURRENT_ROLE
+        saved_case = _CURRENT_CASE_ID
+        saved_branch = _CURRENT_BRANCH_LABEL
         _CURRENT_ROLE = role
         _CURRENT_CASE_ID = case_id
+        _CURRENT_BRANCH_LABEL = branch_label
 
         base_dir = _get_base_artifact_dir()
-        branch_art_dir = os.path.join(base_dir, case_id, role)
+        branch_art_dir = os.path.join(base_dir, case_id, branch_label)
         os.makedirs(branch_art_dir, exist_ok=True)
+
+        orig_mock = self.mock_generator
+        if orig_mock is not None:
+            def _wrapped_mock(r, turn, msgs):
+                cfg = _get_a1_config()
+                primary_cfg = cfg.get("surfaces", {}).get("primary", {})
+                
+                sys_prompt = getattr(self, "system_prompt", None) or f"Representation-Lifting Executor Task for {r}"
+                
+                # Emit canonical request
+                req_path, req_sha = emit_canonical_request(
+                    branch_art_dir, turn, self.model_id, sys_prompt, msgs
+                )
+                
+                # Emit surface input
+                si_path, si_sha, _ = emit_surface_input(
+                    branch_art_dir, turn, sys_prompt, msgs, primary_cfg
+                )
+                
+                mock_out = orig_mock(r, turn, msgs)
+                if isinstance(mock_out, tuple) and len(mock_out) >= 3:
+                    resp_text, stop_reason, infra_fail = mock_out[:3]
+                else:
+                    resp_text, stop_reason, infra_fail = str(mock_out), "end_turn", False
+                
+                mock_meta = {
+                    "model_returned": self.model_id if not infra_fail else None,
+                    "assistant_model": self.model_id if not infra_fail else None,
+                    "tools": [],
+                    "mcp_servers": [],
+                    "permission_mode": "mock",
+                    "stop_reason": stop_reason or ("end_turn" if not infra_fail else "INFRA_FAIL"),
+                    "is_infra_failure": bool(infra_fail),
+                }
+                if isinstance(mock_out, tuple) and len(mock_out) == 4 and isinstance(mock_out[3], dict):
+                    mock_meta.update(mock_out[3])
+                
+                emit_transport_metadata(branch_art_dir, turn, mock_meta)
+                
+                if not infra_fail:
+                    emit_response(branch_art_dir, turn, resp_text)
+                
+                return resp_text, stop_reason, infra_fail
+            
+            self.mock_generator = _wrapped_mock
 
         try:
             res = ORIGINAL_SM_RUN(self)
         finally:
+            self.mock_generator = orig_mock
+
             # --- Branch evidence sealing (§A1.7.3) ---
             # Executed immediately upon branch completion, before next branch starts
             sealed_dir = _get_sealed_dir()
             seal_archive_path = os.path.join(
-                sealed_dir, f"sealed_{case_id}_{role}_{self.model_id}.tar"
+                sealed_dir, f"sealed_{case_id}_{branch_label}_{self.model_id}.tar"
             )
             tar_path, tar_sha, file_list = seal_branch_transcript(branch_art_dir, seal_archive_path)
 
@@ -266,7 +335,7 @@ def _build_patched_sm_run():
                 "file_count": len(file_list),
                 "files": file_list,
             }
-            _BRANCH_SEALS[f"{case_id}::{role}"] = seal_info
+            _BRANCH_SEALS[f"{case_id}::{branch_label}"] = seal_info
 
             # Enrich the single-role receipt inside state machine
             if hasattr(self, "receipt") and isinstance(self.receipt, dict):
@@ -282,6 +351,7 @@ def _build_patched_sm_run():
 
             _CURRENT_ROLE = saved_role
             _CURRENT_CASE_ID = saved_case
+            _CURRENT_BRANCH_LABEL = saved_branch
 
         return res
 
@@ -289,14 +359,51 @@ def _build_patched_sm_run():
 
 
 # ---------------------------------------------------------------------------
-# Receipt Enrichment Helper (§A1.17)
+# Receipt Enrichment Helpers (§A1.17 / Findings F5, F6, F7)
 # ---------------------------------------------------------------------------
 
-def _enrich_blind_receipt(receipt: dict, case_id: str, model_id: str) -> dict:
-    """Enrich execution receipt with all twelve §A1.17 required fields."""
+def _extract_observed_model_evidence(case_id: str, branch_labels: list[str]) -> tuple:
+    """
+    Inspects transport_metadata_*.json across all specified branch artifact directories
+    for the given case_id.
+    Returns: (displayed_label, in_allowed_set, observed_models_list)
+    """
     cfg = _get_a1_config()
     primary = cfg.get("surfaces", {}).get("primary", {})
-    allowed_labels = primary.get("allowed_model_labels", [])
+    allowed_labels = set(primary.get("allowed_model_labels", []))
+    base_dir = _get_base_artifact_dir()
+
+    observed_models = []
+    for blabel in branch_labels:
+        bdir = os.path.join(base_dir, case_id, blabel)
+        for sub in ["transport_metadata", "metadata"]:
+            meta_dir = os.path.join(bdir, sub)
+            if os.path.isdir(meta_dir):
+                for fname in sorted(os.listdir(meta_dir)):
+                    if fname.startswith("transport_metadata_") and fname.endswith(".json") and not fname.endswith(".sha256"):
+                        mpath = os.path.join(meta_dir, fname)
+                        try:
+                            with open(mpath, "r", encoding="utf-8") as f:
+                                mdata = json.load(f)
+                                ret_model = mdata.get("model_returned")
+                                if ret_model:
+                                    observed_models.append(ret_model)
+                        except Exception:
+                            pass
+
+    unique_observed = sorted(list(set(observed_models)))
+    if not unique_observed:
+        return "UNOBSERVED", False, []
+
+    displayed = unique_observed[0] if len(unique_observed) == 1 else unique_observed
+    in_allowed = bool(unique_observed and all(m in allowed_labels for m in unique_observed))
+    return displayed, in_allowed, unique_observed
+
+
+def _enrich_receipt(receipt: dict, case_id: str, model_id: str, branch_labels: list[str]) -> dict:
+    """Enrich execution receipt with all twelve §A1.17 required custody fields."""
+    cfg = _get_a1_config()
+    primary = cfg.get("surfaces", {}).get("primary", {})
 
     cfg_path = _A1_CONFIG_PATH or os.path.join(
         _ROOT_DIR, "evidence", "amendment_a1", "a1_transport_config.json"
@@ -304,17 +411,25 @@ def _enrich_blind_receipt(receipt: dict, case_id: str, model_id: str) -> dict:
     bridge_path = os.path.join(_ROOT_DIR, "tools", "a1_surface_bridge.py")
     activate_path = os.path.join(_ROOT_DIR, "tools", "a1_activate.py")
 
-    d_seal = _BRANCH_SEALS.get(f"{case_id}::D")
-    s_seal = _BRANCH_SEALS.get(f"{case_id}::S")
-    l_seal = _BRANCH_SEALS.get(f"{case_id}::L")
+    displayed, in_allowed, observed_models = _extract_observed_model_evidence(case_id, branch_labels)
+
+    branch_seals = {bl: _BRANCH_SEALS.get(f"{case_id}::{bl}") for bl in branch_labels}
+    seal_hashes = {bl: (branch_seals[bl].get("sha256") if branch_seals.get(bl) else None) for bl in branch_labels}
 
     receipt["transport_amendment"] = "A1"
     receipt["transport_surface"] = primary.get("surface_type", "claude-code-cli")
+    receipt["surface_metadata"] = {
+        "type": primary.get("surface_type", "claude-code-cli"),
+        "version": primary.get("surface_version", ""),
+        "plan_tier": primary.get("plan_tier", "Pro"),
+    }
+    receipt["plan_tier"] = primary.get("plan_tier", "Pro")
     receipt["model_identity_evidence"] = primary.get(
         "model_identity_evidence", "CLAUDE_CODE_STREAM_JSON_INIT_MODEL"
     )
-    receipt["model_label_displayed"] = model_id
-    receipt["model_label_in_allowed_set"] = model_id in allowed_labels
+    receipt["model_label_displayed"] = displayed
+    receipt["model_label_in_allowed_set"] = in_allowed
+    receipt["observed_models"] = observed_models
     receipt["a1_transport_config_sha256"] = _sha256_file(cfg_path) if os.path.isfile(cfg_path) else None
     receipt["bridge_sha256"] = _sha256_file(bridge_path) if os.path.isfile(bridge_path) else None
     receipt["bridge_activate_sha256"] = _sha256_file(activate_path) if os.path.isfile(activate_path) else None
@@ -323,18 +438,15 @@ def _enrich_blind_receipt(receipt: dict, case_id: str, model_id: str) -> dict:
     receipt["message_history_handling"] = primary.get(
         "message_history_handling", "DEGRADED_HISTORY_FLATTENED_TO_USER_CONTENT"
     )
-    receipt["branch_sealed_transcripts"] = {
-        "D": d_seal,
-        "S": s_seal,
-        "L": l_seal,
-    }
-    receipt["transcript_sealed_sha256"] = {
-        "D": d_seal.get("sha256") if d_seal else None,
-        "S": s_seal.get("sha256") if s_seal else None,
-        "L": l_seal.get("sha256") if l_seal else None,
-    }
+    receipt["branch_sealed_transcripts"] = branch_seals
+    receipt["transcript_sealed_sha256"] = seal_hashes
 
     return receipt
+
+
+def _enrich_blind_receipt(receipt: dict, case_id: str, model_id: str) -> dict:
+    """Enrich blind execution receipt with all twelve §A1.17 required fields."""
+    return _enrich_receipt(receipt, case_id, model_id, ["D", "S", "L"])
 
 
 # ---------------------------------------------------------------------------
@@ -398,22 +510,104 @@ def _build_patched_run_blind_case():
 
 def _build_patched_run_control_case():
     @functools.wraps(ORIGINAL_RUN_CONTROL_CASE)
-    def _wrapped_run_control_case(*args, **kwargs):
-        report = ORIGINAL_RUN_CONTROL_CASE(*args, **kwargs)
-        if isinstance(report, dict):
-            report["transport_amendment"] = "A1"
-        return report
+    def _wrapped_run_control_case(
+        model_id: str,
+        target_path: Optional[str] = None,
+        stub_path: Optional[str] = None,
+        admissibility_path: Optional[str] = None,
+        mock_generator=None,
+        on_d_complete_callback=None,
+        run_tmp_root: Optional[str] = None,
+        receipt_out_path: Optional[str] = None,
+    ) -> dict:
+        global _CURRENT_CASE_ID
+        saved_case = _CURRENT_CASE_ID
+        _CURRENT_CASE_ID = "control"
+
+        try:
+            report = ORIGINAL_RUN_CONTROL_CASE(
+                model_id=model_id,
+                target_path=target_path,
+                stub_path=stub_path,
+                admissibility_path=admissibility_path,
+                mock_generator=mock_generator,
+                on_d_complete_callback=on_d_complete_callback,
+                run_tmp_root=run_tmp_root,
+                receipt_out_path=receipt_out_path,
+            )
+
+            # Enrich joint control receipt with all §A1.17 fields (D, L branches)
+            enriched = _enrich_receipt(report, "control", model_id, ["D", "L"])
+
+            tools_dir = _harness.TOOLS_DIR
+            receipt_targets = [
+                receipt_out_path or os.path.join(tools_dir, f"execution_receipt_control_{model_id}.json"),
+                os.path.join(tools_dir, "execution_receipt_control.json"),
+                os.path.join(_get_receipt_dir(), f"execution_receipt_control_{model_id}.json"),
+                os.path.join(_get_receipt_dir(), "execution_receipt_control.json"),
+            ]
+            for rpath in receipt_targets:
+                if rpath:
+                    try:
+                        os.makedirs(os.path.dirname(os.path.abspath(rpath)), exist_ok=True)
+                        with open(rpath, "w", encoding="utf-8") as f:
+                            json.dump(enriched, f, indent=2)
+                    except OSError:
+                        pass
+
+            return enriched
+        finally:
+            _CURRENT_CASE_ID = saved_case
 
     return _wrapped_run_control_case
 
 
 def _build_patched_run_calibration_family():
     @functools.wraps(ORIGINAL_RUN_CALIBRATION_FAMILY)
-    def _wrapped_run_calibration_family(*args, **kwargs):
-        report = ORIGINAL_RUN_CALIBRATION_FAMILY(*args, **kwargs)
-        if isinstance(report, dict):
-            report["transport_amendment"] = "A1"
-        return report
+    def _wrapped_run_calibration_family(
+        family_name: str,
+        model_id: str,
+        mock_generator=None,
+        on_d_complete_callback=None,
+        run_tmp_root: Optional[str] = None,
+    ) -> dict:
+        global _CURRENT_CASE_ID
+        saved_case = _CURRENT_CASE_ID
+        case_id = f"calibration_{family_name}"
+        _CURRENT_CASE_ID = case_id
+
+        try:
+            report = ORIGINAL_RUN_CALIBRATION_FAMILY(
+                family_name=family_name,
+                model_id=model_id,
+                mock_generator=mock_generator,
+                on_d_complete_callback=on_d_complete_callback,
+                run_tmp_root=run_tmp_root,
+            )
+
+            # Enrich joint calibration receipt with all §A1.17 fields (D1, D2, S1, L1, S2, L2 branches)
+            enriched = _enrich_receipt(
+                report, case_id, model_id, ["D1", "D2", "S1", "L1", "S2", "L2"]
+            )
+
+            tools_dir = _harness.TOOLS_DIR
+            receipt_targets = [
+                os.path.join(tools_dir, f"execution_receipt_calibration_{family_name}_{model_id}.json"),
+                os.path.join(tools_dir, f"execution_receipt_calibration_{family_name}.json"),
+                os.path.join(_get_receipt_dir(), f"execution_receipt_calibration_{family_name}_{model_id}.json"),
+                os.path.join(_get_receipt_dir(), f"execution_receipt_calibration_{family_name}.json"),
+            ]
+            for rpath in receipt_targets:
+                try:
+                    os.makedirs(os.path.dirname(os.path.abspath(rpath)), exist_ok=True)
+                    with open(rpath, "w", encoding="utf-8") as f:
+                        json.dump(enriched, f, indent=2)
+                except OSError:
+                    pass
+
+            return enriched
+        finally:
+            _CURRENT_CASE_ID = saved_case
 
     return _wrapped_run_calibration_family
 
@@ -440,6 +634,10 @@ assert _harness.ExecutorStateMachine.run is _PATCHED_SM_RUN, \
     "A1 activation failed: ExecutorStateMachine.run was not patched"
 assert _harness.run_blind_case is _PATCHED_RUN_BLIND_CASE, \
     "A1 activation failed: run_blind_case was not patched"
+assert _harness.run_control_case is _PATCHED_RUN_CONTROL_CASE, \
+    "A1 activation failed: run_control_case was not patched"
+assert _harness.run_calibration_family is _PATCHED_RUN_CALIBRATION_FAMILY, \
+    "A1 activation failed: run_calibration_family was not patched"
 
 if __name__ == "__main__":
     _harness.main()

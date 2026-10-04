@@ -1,7 +1,7 @@
-## Amendment 0.21-A1 r7: Pre-Execution Surface Amendment
+## Amendment 0.21-A1 r8: Pre-Execution Surface Amendment
 
-**Status:** CANDIDATE (r7) — remediates findings F1–F4 from independent review
-of commit 0fba42b; requires fresh independent review of exact candidate commit
+**Status:** CANDIDATE (r8) — remediates findings F5–F7 from independent review
+of commit 4eed7b6; requires fresh independent review of exact candidate commit
 and signed annotated tag ratification BEFORE Gate 5, and BEFORE any executor
 sees blind theorem content  
 **Amendment class:** Execution-surface  
@@ -561,20 +561,28 @@ inference-control settings, response exact-match.
 
 ### A1.17 Evidence Preservation
 
-Each execution session under A1 MUST produce:
+Each execution session under A1 (blind transfer, negative control, and calibration families) MUST produce:
 
-1. Hash-addressed artifacts per turn — request_N.json + surface_input_N.txt +
-   response_N.txt, each with SHA-256 (section A1.8).
-2. Sealed transcript — assembled from artifacts, SHA-256 hashed on branch
-   completion (section A1.7.3).
-3. Model label captures — screenshot/terminal at session start, plus mid-session
-   if > 30 min.
-4. Surface metadata — type, version, plan tier.
+1. Hash-addressed artifacts per turn — `request_N.json` + `surface_input_N.txt` +
+   `transport_metadata_N.json` + `response_N.txt`, each with companion `.sha256` (sections A1.8, A1.17).
+   Turn transport metadata MUST record provider-emitted init model, assistant model, tools,
+   mcp_servers, permission_mode, and stop_reason.
+2. Sealed transcript per branch — assembled from turn artifacts, SHA-256 hashed on branch
+   completion (section A1.7.3), with zero cross-case or cross-branch namespace overlap:
+   - blind transfer: D, S, L;
+   - negative control: D, L;
+   - calibration families: D1, D2, S1, L1, S2, L2.
+3. Model label captures and observed evidence — screenshot/terminal at session start;
+   receipt model identity fields (`model_label_displayed`, `model_label_in_allowed_set`)
+   MUST be derived strictly from preserved observed provider transport metadata artifacts,
+   not from requested model identifiers, failing closed on mismatch.
+4. Surface metadata — type, version, and frozen plan tier (`Pro` for primary Claude Code CLI,
+   `Plus (OpenAI Subscription) -- REPLICATION_DEFERRED` for replication).
 5. Execution receipt — JSON per representation-lifting-execution-receipt/v1 with
-   additional A1 fields: transport_amendment, transport_surface,
-   model_identity_evidence, model_label_displayed, model_label_in_allowed_set,
-   a1_transport_config_sha256, bridge_sha256, inference_controls,
-   system_role_handling, message_history_handling, transcript_sealed_sha256.
+   additional A1 fields across all evaluation arms: `transport_amendment`, `transport_surface`,
+   `surface_metadata`, `model_identity_evidence`, `model_label_displayed`, `model_label_in_allowed_set`,
+   `a1_transport_config_sha256`, `bridge_sha256`, `bridge_activate_sha256`, `inference_controls`,
+   `system_role_handling`, `message_history_handling`, `branch_sealed_transcripts`, `transcript_sealed_sha256`.
 
 ---
 
@@ -586,7 +594,7 @@ Pre-ratification surface reconnaissance (section A1.3)
   -- populate a1_transport_config.json completely
   -- implement tools/a1_surface_bridge.py
   -- implement tests/test_a1_surface_bridge.py
--> Candidate commit (r7):
+-> Candidate commit (r8):
     AMENDMENT_A1_TRANSPORT.md
     evidence/amendment_a1/a1_transport_config.json
     tools/a1_surface_bridge.py
