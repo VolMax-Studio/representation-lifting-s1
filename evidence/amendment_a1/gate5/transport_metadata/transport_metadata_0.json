@@ -1,0 +1,13 @@
+{
+  "schema_version": "representation-lifting-a1-transport-metadata/v1",
+  "turn_number": 0,
+  "timestamp_utc": "2026-10-04T16:41:27.923735+00:00",
+  "model_returned": "claude-sonnet-4-6",
+  "assistant_model": "claude-sonnet-4-6",
+  "tools": [],
+  "mcp_servers": [],
+  "permission_mode": "default",
+  "stop_reason": "end_turn",
+  "is_infra_failure": false,
+  "sha256": "7046f26d32d4c89d4351e89df0593be7ab9538ae9fb149d8d097959a6c3d1df7"
+}

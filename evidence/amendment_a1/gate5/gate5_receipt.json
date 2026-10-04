@@ -1,31 +1,80 @@
 {
-  "gate": "Gate 5",
-  "name": "Neutral Pre-Execution Surface Verification",
-  "amendment": "A1",
-  "timestamp_utc": "2026-10-04T14:13:14Z",
   "gate5_pass": true,
-  "model_requested": "claude-sonnet-4-6",
-  "model_returned": "claude-sonnet-4-6",
-  "assistant_model": "claude-sonnet-4-6",
-  "tools": [],
-  "mcp_servers": [],
-  "permission_mode": "default",
   "response_text": "{\"status\": \"ok\", \"probe\": \"representation-lifting-s1-gate5\"}",
   "response_stripped": "{\"status\": \"ok\", \"probe\": \"representation-lifting-s1-gate5\"}",
   "expected": "{\"status\": \"ok\", \"probe\": \"representation-lifting-s1-gate5\"}",
   "exact_match": true,
   "failure_reason": null,
-  "request_envelope_path": "evidence/amendment_a1/gate5/requests/request_0.json",
-  "request_envelope_sha256": "bd63e184dd806f77d87423be6d969a724f550c547edf2efd03bf6e6c486e8797",
-  "surface_input_path": "evidence/amendment_a1/gate5/requests/surface_input_0.txt",
-  "surface_input_sha256": "802b2921b6b5e51b549e74294ee22a5bca57c14a91db2dea32e46b8017885f20",
-  "response_path": "evidence/amendment_a1/gate5/responses/response_0.txt",
-  "response_sha256": "909e8768eec426ae952ec3993c074a750e4724bdf644dad21f28366c0d620523",
+  "preflight": {
+    "preflight_pass": true,
+    "failure_reason": null,
+    "verified_bindings": {
+      "frozen_executor_config_sha256": {
+        "expected": "395deb97fa2b038a93ce416ced4ce3bcba31cddea30db7f3daa5ee5bc01f4b04",
+        "actual": "395deb97fa2b038a93ce416ced4ce3bcba31cddea30db7f3daa5ee5bc01f4b04",
+        "path": "tools/executor_config.json",
+        "status": "MATCH"
+      },
+      "frozen_executor_harness_sha256": {
+        "expected": "ccb1cad202fcdd2dbd931c3b8c5d65d9d368a0bdb26da8946e9b8671b07d8c48",
+        "actual": "ccb1cad202fcdd2dbd931c3b8c5d65d9d368a0bdb26da8946e9b8671b07d8c48",
+        "path": "tools/executor_harness.py",
+        "status": "MATCH"
+      },
+      "bridge_sha256": {
+        "expected": "a18ebd053a6ce8a0d257b76ff0d64bf73d17227558c0296ae36ae425f8e14285",
+        "actual": "a18ebd053a6ce8a0d257b76ff0d64bf73d17227558c0296ae36ae425f8e14285",
+        "path": "tools/a1_surface_bridge.py",
+        "status": "MATCH"
+      },
+      "bridge_tests_sha256": {
+        "expected": "e345a5802492de69c49765e730f920dac3430b1b5a50cc705ea8abb1be78438d",
+        "actual": "e345a5802492de69c49765e730f920dac3430b1b5a50cc705ea8abb1be78438d",
+        "path": "tests/test_a1_surface_bridge.py",
+        "status": "MATCH"
+      },
+      "bridge_activate_sha256": {
+        "expected": "a23581ff50f6903c5211669923aebaaaadf2641f3926348f94ba98af0b7279fb",
+        "actual": "a23581ff50f6903c5211669923aebaaaadf2641f3926348f94ba98af0b7279fb",
+        "path": "tools/a1_activate.py",
+        "status": "MATCH"
+      },
+      "target_preparer_sha256": {
+        "expected": "e432a9442edd1b4407d4da316447ace4b7c19bad744241f0cf7a144354f53f41",
+        "actual": "e432a9442edd1b4407d4da316447ace4b7c19bad744241f0cf7a144354f53f41",
+        "path": "tools/prepare_blind_targets.py",
+        "status": "MATCH"
+      },
+      "target_preparer_tests_sha256": {
+        "expected": "500b50842c809e597f6553deaa8825fddc17958fe1eb16c9df6672eaba32d870",
+        "actual": "500b50842c809e597f6553deaa8825fddc17958fe1eb16c9df6672eaba32d870",
+        "path": "tests/test_prepare_blind_targets.py",
+        "status": "MATCH"
+      },
+      "amendment_text_sha256": {
+        "expected": "466b1a57a6987e496a9e32ae219a615107cb132bde04e773614280de6607d52e",
+        "actual": "466b1a57a6987e496a9e32ae219a615107cb132bde04e773614280de6607d52e",
+        "path": "AMENDMENT_A1_TRANSPORT.md",
+        "status": "MATCH"
+      },
+      "surface_binary_sha256": {
+        "expected": "f54e69cbc89b2da61a415700af7ff52a147e862517d4f1b0eecf768448cf7f83",
+        "actual": "f54e69cbc89b2da61a415700af7ff52a147e862517d4f1b0eecf768448cf7f83",
+        "path": "/home/volmax-studio/.npm-global/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe",
+        "status": "MATCH"
+      }
+    }
+  },
   "transcript": [
+    {
+      "event": "a1_gate5_preflight_verified",
+      "preflight_pass": true,
+      "failure_reason": null
+    },
     {
       "event": "a1_bridge_request_emitted",
       "path": "/home/volmax-studio/volmax-projects/iot2/PORTFOLIO/representation-lifting-s1/tools/../evidence/amendment_a1/gate5/requests/request_0.json",
-      "sha256": "bd63e184dd806f77d87423be6d969a724f550c547edf2efd03bf6e6c486e8797"
+      "sha256": "8ff7cb695bb0a89a3d32cd0f20998352f82bcd8e1776ac75588473c2c6cd54de"
     },
     {
       "event": "a1_bridge_surface_input_emitted",
@@ -49,7 +98,7 @@
       "tools": [],
       "mcp_servers": [],
       "permission_mode": "default",
-      "cwd": "/tmp/representation_lifting_a1_u3lg5y81"
+      "cwd": "/tmp/representation_lifting_a1_cbp5nzai"
     },
     {
       "event": "a1_bridge_cli_success",
@@ -58,6 +107,23 @@
       "model_returned": "claude-sonnet-4-6",
       "assistant_model": "claude-sonnet-4-6",
       "stop_reason": "end_turn"
+    },
+    {
+      "event": "a1_bridge_transport_metadata",
+      "metadata": {
+        "model_returned": "claude-sonnet-4-6",
+        "assistant_model": "claude-sonnet-4-6",
+        "tools": [],
+        "mcp_servers": [],
+        "permission_mode": "default",
+        "stop_reason": "end_turn",
+        "is_infra_failure": false
+      }
+    },
+    {
+      "event": "a1_bridge_transport_metadata_emitted",
+      "path": "/home/volmax-studio/volmax-projects/iot2/PORTFOLIO/representation-lifting-s1/tools/../evidence/amendment_a1/gate5/transport_metadata/transport_metadata_0.json",
+      "sha256": "7046f26d32d4c89d4351e89df0593be7ab9538ae9fb149d8d097959a6c3d1df7"
     },
     {
       "event": "a1_bridge_response_emitted",
