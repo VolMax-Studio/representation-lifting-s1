@@ -1,0 +1,10 @@
+{
+  "task_id": "7a136e06-af9f-474f-a958-9654355a6385/task-5524",
+  "classification": "INVALID_PRE_RATIFICATION",
+  "start_utc": "2026-10-04T14:28:01Z",
+  "end_utc": "2026-10-04T14:44:12Z",
+  "termination_reason": "OPERATOR_TERMINATION_PRE_RATIFICATION_INVALIDITY",
+  "sealed_tar_sha256": "0e0aafd3cbe3251eb8a21cc682d458f3a045761b130cf380d09b15b64d0b9b4d",
+  "offline_archive_filename": "sealed_run.tar",
+  "outcome_visibility": "NONE"
+}

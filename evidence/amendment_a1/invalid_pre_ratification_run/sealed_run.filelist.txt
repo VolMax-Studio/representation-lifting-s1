@@ -1,0 +1,8 @@
+staged_invalid_run_artifacts/
+staged_invalid_run_artifacts/run_artifacts/
+staged_invalid_run_artifacts/run_artifacts/requests/
+staged_invalid_run_artifacts/run_artifacts/requests/request_0.json
+staged_invalid_run_artifacts/run_artifacts/requests/request_0.json.sha256
+staged_invalid_run_artifacts/run_artifacts/requests/surface_input_0.txt
+staged_invalid_run_artifacts/run_artifacts/requests/surface_input_0.txt.sha256
+staged_invalid_run_artifacts/task-5524.log
