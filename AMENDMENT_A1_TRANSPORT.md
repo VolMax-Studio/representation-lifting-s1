@@ -616,7 +616,7 @@ This amendment supersedes four execution-layer mechanisms:
 The following remain identical to frozen v0.21:
 
 - H0, H1, H2 definitions, falsification criteria, evaluation logic
-- State-machine role/transition semantics (S->D->L sequencing, branch non-persistence,
+- State-machine role/transition semantics (D->S->L sequencing, branch non-persistence,
   cumulative T1->T2 compilation, LIFT-NOT-FOUND classification, budget enforcement,
   turn counting)
 - Protocol-defined system prompts and neutral prompt text

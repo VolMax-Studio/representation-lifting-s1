@@ -89,5 +89,7 @@
   "fields_requiring_ivan_reconnaissance": [],
   "status": "PRIMARY_READY_FOR_REVIEW__REPLICATION_NOT_EVALUABLE_INFRA_DEFERRED",
   "bridge_activate_sha256": "c34bd4628868ad9670e62ef9671bde0c7913b90c0ab006af9c0c832387c620ed",
-  "amendment_text_sha256": "bb60cabb054f912ed5514da806eb834e3e991b04095699c8f7b96e948ab17daa"
+  "target_preparer_sha256": "517106d0dc0cc4514f78dd43fe9b8b65dd77a1d9f58b0ef7482daf5169882672",
+  "target_preparer_tests_sha256": "cb2a0a9ebb5c5dea17d55050ee0ce40cb995eed12e9d453b088597bb19443b3b",
+  "amendment_text_sha256": "c02fc377c8cd29c09428bfee05b515fd5228d759d06e4a1d4eb89c5eb1432022"
 }

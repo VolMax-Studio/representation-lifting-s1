@@ -76,8 +76,10 @@ tar -tf "$SEAL/sealed_run.tar" > "$SEAL/sealed_run.filelist.txt"   # names only
 ```
 
 Committed to the repository: `sealed_run.tar.sha256`, `sealed_run.filelist.txt`, the task exit status,
-and start/end UTC times. **The tar itself is not committed** (a public commit would expose the contents);
-it stays offline until §3.3 is satisfied and is then published so that its hash can be checked.
+and start/end UTC times in commit `40507da` (pre-push ref `f8c0780`). Staging of artifacts prior to
+tar creation was executed via byte-copy (`cp`) without content inspection. **The tar itself is not committed**
+(a public commit would expose the contents); it stays offline until §3.3 is satisfied and is then published
+so that its hash can be checked.
 
 ## 5. Provenance items recorded with this deviation
 
