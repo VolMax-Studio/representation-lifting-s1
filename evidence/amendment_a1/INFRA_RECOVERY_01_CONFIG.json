@@ -31,15 +31,15 @@
   },
   "recovery_implementation": {
     "path": "tools/a1_infra_recovery_01.py",
-    "sha256": "52a2531e4b17d742fb2830aa9c21e4baa84d17c895ad5c306e27b9108a1f3979"
+    "sha256": "153a6c65b559bc932b67bcdcab05ead51feb12f82b0e2ad7dc29ec2c187a933f"
   },
   "recovery_tests": {
     "path": "tests/test_a1_infra_recovery_01.py",
-    "sha256": "fb3ceeea9b12616c47c9d2ae99ae0515dd9ca78e8789049ae7893480ebfd9247"
+    "sha256": "46347a73abf9fdab3f9ea0b277e5716ce3d34c858ebc910ea817fa6701e42e40"
   },
   "recovery_amendment": {
     "path": "INFRA_RECOVERY_01.md",
-    "sha256": "682bd267a34c9219afe6b3057baedc5865c029d8ea8ed9abde89b9671b1067cb"
+    "sha256": "da9b09050afc13e979d3ec38f8830ffb51134078235bdaada7c76cefe7bbaa10"
   },
   "failed_gate5_evidence_sha256": {
     "requests/request_0.json": "438fd0f2d1be12ee187b5349a8fe43964c533eb76033622f5a4d7650d2c32746",

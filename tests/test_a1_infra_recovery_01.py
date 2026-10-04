@@ -114,6 +114,64 @@ class TestInfraRecovery01(unittest.TestCase):
             executor_config["transport_policy"], self.executor_config["transport_policy"]
         )
 
+    def test_modified_signed_tree_files_halt_before_namespace_or_inference(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            paths = [
+                recovery.RECOVERY_CONFIG_RELATIVE_PATH,
+                "tools/a1_infra_recovery_01.py",
+                "tests/test_a1_infra_recovery_01.py",
+                "INFRA_RECOVERY_01.md",
+                "evidence/amendment_a1/a1_transport_config.json",
+                "tools/a1_surface_bridge.py",
+                "tools/executor_config.json",
+                "tools/executor_harness.py",
+            ]
+            for relative_path in paths:
+                path = root / relative_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(f"committed:{relative_path}\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=root, check=True)
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-qm", "candidate"], cwd=root, check=True)
+            commit = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=root, check=True,
+                capture_output=True, text=True,
+            ).stdout.strip()
+            cfg = {
+                "recovery_implementation": {"path": paths[1]},
+                "recovery_tests": {"path": paths[2]},
+                "recovery_amendment": {"path": paths[3]},
+                "a1_transport_config": {"path": paths[4]},
+                "ratified_bridge": {"path": paths[5]},
+                "frozen_executor_config": {"path": paths[6]},
+                "frozen_executor_harness": {"path": paths[7]},
+            }
+            recovery_path = root / "evidence/amendment_a1/infra_recovery_01/gate5"
+            originals = {path: (root / path).read_bytes() for path in paths[:2]}
+            for relative_path in paths[:2]:
+                with self.subTest(relative_path=relative_path):
+                    (root / relative_path).write_text("tampered\n", encoding="utf-8")
+                    with patch.object(recovery, "verify_preserved_failed_gate5"), \
+                         patch.object(recovery, "load_bound_runtime", return_value=({}, {})), \
+                         patch.object(recovery, "recovery_artifact_dir", return_value=recovery_path), \
+                         patch.object(recovery, "verify_recovery_ratification", return_value=commit), \
+                         patch.object(recovery, "run_recovery_probe") as probe:
+                        with self.assertRaisesRegex(RuntimeError, "SIGNED_TREE_WORKTREE_MISMATCH"):
+                            recovery.execute_once(root, cfg)
+                        probe.assert_not_called()
+                    self.assertFalse(recovery_path.exists())
+                    (root / relative_path).write_bytes(originals[relative_path])
+
+    def test_production_cli_rejects_alternate_recovery_config(self):
+        with self.assertRaises(SystemExit) as raised:
+            recovery.main([
+                "--execute-recovery-gate5", "--recovery-config", "/tmp/alternate.json"
+            ])
+        self.assertEqual(raised.exception.code, 2)
+
     def test_rate_limit_then_neutral_response_passes_in_two_calls(self):
         failure = MagicMock(returncode=1, stdout=stream_result(synthetic_error=True), stderr="")
         success = MagicMock(

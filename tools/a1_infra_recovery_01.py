@@ -20,6 +20,7 @@ from tools import a1_surface_bridge as bridge
 DEFAULT_RECOVERY_CONFIG = (
     ROOT / "evidence" / "amendment_a1" / "INFRA_RECOVERY_01_CONFIG.json"
 )
+RECOVERY_CONFIG_RELATIVE_PATH = "evidence/amendment_a1/INFRA_RECOVERY_01_CONFIG.json"
 
 
 def sha256_file(path: Path) -> str:
@@ -67,6 +68,9 @@ def load_bound_runtime(root: Path, recovery_config: dict) -> tuple[dict, dict]:
     executor_path = require_bound_file(root, recovery_config["frozen_executor_config"])
     require_bound_file(root, recovery_config["frozen_executor_harness"])
     require_bound_file(root, recovery_config["ratified_bridge"])
+    require_bound_file(root, recovery_config["recovery_implementation"])
+    require_bound_file(root, recovery_config["recovery_tests"])
+    require_bound_file(root, recovery_config["recovery_amendment"])
     a1_config = load_json(a1_path)
     executor_config = load_json(executor_path)
     if not isinstance(executor_config.get("transport_policy"), dict):
@@ -106,6 +110,31 @@ def verify_recovery_ratification(root: Path, recovery_config: dict) -> str:
     return tag_commit
 
 
+def verify_signed_tree_files(root: Path, recovery_config: dict, tag_commit: str) -> None:
+    """Require critical worktree bytes to equal the exact signed commit tree."""
+    relative_paths = [
+        RECOVERY_CONFIG_RELATIVE_PATH,
+        recovery_config["recovery_implementation"]["path"],
+        recovery_config["recovery_tests"]["path"],
+        recovery_config["recovery_amendment"]["path"],
+        recovery_config["a1_transport_config"]["path"],
+        recovery_config["ratified_bridge"]["path"],
+        recovery_config["frozen_executor_config"]["path"],
+        recovery_config["frozen_executor_harness"]["path"],
+    ]
+    for relative_path in relative_paths:
+        try:
+            committed = subprocess.run(
+                ["git", "show", f"{tag_commit}:{relative_path}"],
+                cwd=root, check=True, capture_output=True,
+            ).stdout
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(f"SIGNED_TREE_PATH_MISSING:{relative_path}") from exc
+        worktree_path = root / relative_path
+        if not worktree_path.is_file() or worktree_path.read_bytes() != committed:
+            raise RuntimeError(f"SIGNED_TREE_WORKTREE_MISMATCH:{relative_path}")
+
+
 def run_recovery_probe(
     a1_config: dict,
     executor_config: dict,
@@ -130,6 +159,7 @@ def execute_once(root: Path, recovery_config: dict) -> dict:
     if artifact_dir.exists():
         raise RuntimeError("RECOVERY_GATE5_ALREADY_STARTED_OR_COMPLETED")
     ratified_commit = verify_recovery_ratification(root, recovery_config)
+    verify_signed_tree_files(root, recovery_config, ratified_commit)
 
     artifact_dir.mkdir(parents=True, exist_ok=False)
     start_record = {
@@ -150,12 +180,11 @@ def execute_once(root: Path, recovery_config: dict) -> dict:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="One-shot INFRA_RECOVERY_01 Gate 5")
     parser.add_argument("--execute-recovery-gate5", action="store_true")
-    parser.add_argument("--recovery-config", default=str(DEFAULT_RECOVERY_CONFIG))
     args = parser.parse_args(argv)
     if not args.execute_recovery_gate5:
         parser.print_help()
         return 2
-    recovery_config = load_json(Path(args.recovery_config))
+    recovery_config = load_json(DEFAULT_RECOVERY_CONFIG)
     result = execute_once(ROOT, recovery_config)
     if result.get("gate5_pass") is True:
         print("RECOVERY GATE5 PASS")

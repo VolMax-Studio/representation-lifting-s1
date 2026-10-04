@@ -68,6 +68,10 @@ The recovery:
   or failure consumes the sole recovery execution;
 - verifies the preserved failed-r9 evidence file set and hashes;
 - verifies the signed recovery tag points to the current candidate commit;
+- accepts only the committed `INFRA_RECOVERY_01_CONFIG.json` production config,
+  with no alternate-config CLI override;
+- compares every critical recovery/runtime worktree file byte-for-byte with the
+  corresponding blob in the signed tag commit before creating the namespace;
 - verifies all bound frozen files before inference;
 - uses the same `claude-sonnet-4-6`, neutral system/user probe, exact-match rule,
   model identity checks, tool/MCP checks, and preflight bindings as r9 Gate 5;
