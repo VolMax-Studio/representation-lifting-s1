@@ -373,7 +373,11 @@ tools/a1_surface_bridge.py MUST:
 - Return the exact (response_text, stop_reason, is_infra_failure) tuple
 - Emit request_N.json and surface_input_N.txt with SHA-256 before relay
 - Emit response_N.txt with SHA-256 after relay
-- Enforce request timeout capped by remaining_wallclock
+- Enforce request timeout capped by remaining_wallclock; on `TimeoutExpired`,
+  preserve and parse partial stdout before deciding retry eligibility. Genuine
+  non-synthetic assistant content is delivered evidence and makes the attempt
+  non-retryable. A synthetic/error envelope is retryable only with objective
+  machine-readable error evidence, and unclassifiable partial output fails closed.
 - MAY parse only the subscription surface's transport envelope/metadata needed
   to extract the verbatim model result and verify provider-reported model/tool
   metadata; it MUST NOT semantically interpret proof content
@@ -400,7 +404,8 @@ The candidate commit includes tests/test_a1_surface_bridge.py demonstrating:
 6. Response artifact emission — response_N.txt written with correct SHA-256.
 7. No control-logic leakage — bridge does not invoke Lean, parse content beyond
    raw text, modify turn counts, or generate prompt content.
-8. Timeout enforcement — bridge returns is_infra_failure=True on pre-response timeout.
+8. Timeout enforcement — bridge preserves and classifies partial stdout; only a
+   timeout with evidence of zero genuine model content is pre-response/retryable.
 9. Transport failure classification — connection/timeout failures retryable;
    delivered responses (including empty) not retryable.
 10. Multi-turn history serialization.
@@ -474,6 +479,12 @@ requires its own completed reconnaissance/config review before its Gate 5.
    response_0.txt with valid SHA-256).
 7. Verify all frozen settings active and matching.
 
+The production CLI default MUST resolve Gate 5 evidence under the frozen
+revision execution namespace (`evidence/amendment_a1/r9_execution/gate5/` for
+this candidate). It MUST NOT reuse or overwrite the preserved legacy/r8
+`evidence/amendment_a1/gate5/` directory. An explicit `--artifact-dir` remains a
+testing/operator override, not a prerequisite for safe provenance.
+
 **A1.11.2 Pass criteria (per surface):**
 - Surface responded without error or timeout
 - Model label in frozen allowed-label set
@@ -526,6 +537,15 @@ turn even if it later fails semantic, proof, or compiler verification. A genuine
 delivered response from a non-allowed model remains `MODEL_IDENTITY_FAIL` and is
 not retried to shop for a desired model. Exhaustion of the frozen attempt budget
 produces the existing `INFRA_FAILURE`; it never authorizes whole-case resampling.
+
+**A1.12.7 Timeout partial-stream custody (r9):** `TimeoutExpired` is not by
+itself proof that the failure preceded response delivery. Its preserved partial
+stdout MUST be parsed first. Genuine non-synthetic assistant content is preserved
+as `response_N.txt` and classified delivered/non-retryable even when process
+completion times out. Zero model content remains retryable. A synthetic-only
+envelope is retryable only with objective error evidence; otherwise it fails
+closed. Any unparseable partial stdout that leaves delivery ambiguous also fails
+closed and is not retried.
 
 ---
 

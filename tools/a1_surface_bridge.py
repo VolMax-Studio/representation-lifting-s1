@@ -366,6 +366,125 @@ def is_pre_response_transport_failure(exc: Exception) -> bool:
     ))
 
 
+def _classify_timeout_partial_stdout(stdout_text: str) -> dict:
+    """Parse only transport-envelope facts needed to make timeout retry decisions."""
+    init_event = None
+    result_event = None
+    assistant_events = []
+    stream_error_events = []
+    non_json_seen = False
+
+    for raw_line in stdout_text.splitlines():
+        if not raw_line.strip():
+            continue
+        try:
+            event = json.loads(raw_line)
+        except json.JSONDecodeError:
+            non_json_seen = True
+            continue
+        if event.get("type") == "system" and event.get("subtype") == "init":
+            init_event = event
+        elif event.get("type") == "assistant":
+            assistant_events.append(event)
+        elif event.get("type") == "result":
+            result_event = event
+        elif event.get("type") == "error":
+            stream_error_events.append(event)
+
+    synthetic_seen = any(
+        (event.get("message", {}) or {}).get("model") == "<synthetic>"
+        for event in assistant_events
+    )
+    genuine_events = [
+        event for event in assistant_events
+        if (event.get("message", {}) or {}).get("model") != "<synthetic>"
+        and (event.get("message", {}) or {}).get("content") not in (None, "", [])
+    ]
+    delivered_parts = []
+    for event in genuine_events:
+        content = (event.get("message", {}) or {}).get("content")
+        if isinstance(content, str):
+            delivered_parts.append(content)
+        elif isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    delivered_parts.append(block.get("text", ""))
+                elif block not in (None, ""):
+                    delivered_parts.append(json.dumps(block, ensure_ascii=False, sort_keys=True))
+        else:
+            delivered_parts.append(json.dumps(content, ensure_ascii=False, sort_keys=True))
+
+    is_api_error_message = any(
+        event.get("isApiErrorMessage") is True
+        or (event.get("message", {}) or {}).get("isApiErrorMessage") is True
+        for event in assistant_events
+    )
+    assistant_error_marker = any(
+        event.get("error") not in (None, False, "")
+        or (event.get("message", {}) or {}).get("error") not in (None, False, "")
+        for event in assistant_events
+    ) or bool(stream_error_events)
+    result_is_error = result_event.get("is_error") if isinstance(result_event, dict) else None
+    result_error_marker = bool(
+        isinstance(result_event, dict)
+        and (result_event.get("is_error") is True
+             or result_event.get("error") not in (None, False, ""))
+    )
+    assistant_model = next((
+        (event.get("message", {}) or {}).get("model")
+        for event in reversed(assistant_events)
+        if (event.get("message", {}) or {}).get("model") is not None
+    ), None)
+    objective_error_evidence = bool(
+        is_api_error_message or assistant_error_marker or result_error_marker
+    )
+    successful_result_delivered = bool(
+        isinstance(result_event, dict)
+        and result_event.get("is_error") is not True
+        and "result" in result_event
+        and not synthetic_seen
+    )
+    genuine_content_delivered = bool(genuine_events or successful_result_delivered)
+    response_text = (
+        result_event.get("result", "")
+        if successful_result_delivered else "".join(delivered_parts)
+    )
+    return {
+        "response_text": response_text,
+        "genuine_content_delivered": genuine_content_delivered,
+        "synthetic_seen": synthetic_seen,
+        "objective_error_evidence": objective_error_evidence,
+        "non_json_seen": non_json_seen,
+        "metadata": {
+            "model_returned": init_event.get("model") if isinstance(init_event, dict) else None,
+            "assistant_model": assistant_model,
+            "tools": init_event.get("tools", []) if isinstance(init_event, dict) else [],
+            "mcp_servers": init_event.get("mcp_servers", []) if isinstance(init_event, dict) else [],
+            "permission_mode": init_event.get("permissionMode") if isinstance(init_event, dict) else None,
+        },
+        "parsed": {
+            "init_model": init_event.get("model") if isinstance(init_event, dict) else None,
+            "assistant_model": assistant_model,
+            "is_api_error_message": is_api_error_message,
+            "result_is_error": result_is_error,
+            "result_subtype": result_event.get("subtype") if isinstance(result_event, dict) else None,
+            "assistant_error_evidence": [
+                _safe_error_fields(event) for event in assistant_events
+                if _safe_error_fields(event)
+            ],
+            "stream_error_evidence": [
+                _safe_error_fields(event) for event in stream_error_events
+                if _safe_error_fields(event)
+            ],
+            "result_error_evidence": _safe_error_fields(result_event),
+            "non_json_output_seen": non_json_seen,
+            "synthetic_assistant_seen": synthetic_seen,
+            "actual_model_response_content_delivered": genuine_content_delivered,
+            "error_evidence": {"exception_type": "TimeoutExpired"},
+        },
+    }
+
+
 # ---------------------------------------------------------------------------
 # Claude Code CLI relay
 # ---------------------------------------------------------------------------
@@ -728,14 +847,44 @@ def _relay_claude_code_cli(
         stderr_text = exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
         if attempt_dir is not None:
             raw_evidence = _emit_attempt_raw(attempt_dir, stdout_text, stderr_text)
+        partial = _classify_timeout_partial_stdout(stdout_text)
+        base_metadata = partial["metadata"]
+        if partial["genuine_content_delivered"]:
+            transcript.append({"event": "a1_bridge_timeout_after_response_delivery"})
+            return finish(
+                "DELIVERED_RESPONSE_PROTOCOL_FAILURE", True,
+                {**base_metadata, "stop_reason": "TIMEOUT_AFTER_RESPONSE_DELIVERY",
+                 "is_infra_failure": True},
+                (partial["response_text"], "TIMEOUT_AFTER_RESPONSE_DELIVERY", True),
+                stdout_text=stdout_text, stderr_text=stderr_text, returncode=None,
+                parsed=partial["parsed"],
+            )
+        if partial["synthetic_seen"] and not partial["objective_error_evidence"]:
+            transcript.append({"event": "a1_bridge_timeout_unproven_synthetic_assistant"})
+            return finish(
+                "SYNTHETIC_WITHOUT_ERROR_EVIDENCE", False,
+                {**base_metadata, "stop_reason": "SYNTHETIC_WITHOUT_ERROR_EVIDENCE",
+                 "is_infra_failure": True},
+                ("", "SYNTHETIC_WITHOUT_ERROR_EVIDENCE", True),
+                stdout_text=stdout_text, stderr_text=stderr_text, returncode=None,
+                parsed=partial["parsed"],
+            )
+        if partial["non_json_seen"]:
+            transcript.append({"event": "a1_bridge_timeout_unclassifiable_partial_output"})
+            return finish(
+                "TIMEOUT_UNCLASSIFIABLE_PARTIAL_OUTPUT", False,
+                {**base_metadata, "stop_reason": "TIMEOUT_UNCLASSIFIABLE_PARTIAL_OUTPUT",
+                 "is_infra_failure": True},
+                ("", "TIMEOUT_UNCLASSIFIABLE_PARTIAL_OUTPUT", True),
+                stdout_text=stdout_text, stderr_text=stderr_text, returncode=None,
+                parsed=partial["parsed"],
+            )
         return finish(
             "PRE_RESPONSE_TRANSPORT_FAILURE", False,
-            {"model_returned": None, "assistant_model": None, "tools": [], "mcp_servers": [],
-             "permission_mode": None, "stop_reason": "TIMEOUT", "is_infra_failure": True},
+            {**base_metadata, "stop_reason": "TIMEOUT", "is_infra_failure": True},
             ("", None, True), stdout_text=stdout_text, stderr_text=stderr_text,
             returncode=None,
-            parsed={"is_api_error_message": False, "result_is_error": None,
-                    "error_evidence": {"exception_type": "TimeoutExpired"}},
+            parsed=partial["parsed"],
         )
     except (FileNotFoundError, OSError) as exc:
         transcript.append({"event": "a1_bridge_cli_not_found", "error": str(exc)})
@@ -1329,6 +1478,22 @@ def run_gate5_probe(
     return gate5_result
 
 
+def default_gate5_artifact_dir(a1_config: dict, root_dir: Optional[str] = None) -> str:
+    """Resolve Gate 5 into the candidate execution namespace, never legacy r8 evidence."""
+    if root_dir is None:
+        root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    namespace = a1_config.get("execution_evidence_namespace")
+    if not isinstance(namespace, str) or not namespace or os.path.isabs(namespace):
+        raise ValueError("execution_evidence_namespace must be a non-empty relative path")
+    candidate = os.path.realpath(os.path.join(
+        root_dir, "evidence", "amendment_a1", namespace, "gate5"
+    ))
+    amendment_root = os.path.realpath(os.path.join(root_dir, "evidence", "amendment_a1"))
+    if os.path.commonpath([candidate, amendment_root]) != amendment_root:
+        raise ValueError("execution_evidence_namespace escapes amendment evidence root")
+    return candidate
+
+
 # ---------------------------------------------------------------------------
 # CLI entry point (Gate 5 only — no blind content)
 # ---------------------------------------------------------------------------
@@ -1347,9 +1512,7 @@ if __name__ == "__main__":
 
     if args.gate5:
         cfg = _load_a1_config(args.a1_config)
-        art_dir = args.artifact_dir or os.path.join(
-            os.path.dirname(__file__), "..", "evidence", "amendment_a1", "gate5"
-        )
+        art_dir = args.artifact_dir or default_gate5_artifact_dir(cfg)
         result = run_gate5_probe(args.model, cfg, art_dir, skip_preflight=args.skip_preflight)
         print(json.dumps(result, indent=2))
         sys.exit(0 if result.get("gate5_pass") else 1)
