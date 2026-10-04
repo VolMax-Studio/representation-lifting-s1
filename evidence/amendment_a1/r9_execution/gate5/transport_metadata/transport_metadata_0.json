@@ -1,0 +1,27 @@
+{
+  "schema_version": "representation-lifting-a1-transport-metadata/v1",
+  "turn_number": 0,
+  "timestamp_utc": "2026-10-04T19:05:03.317756+00:00",
+  "model_returned": "claude-sonnet-4-6",
+  "assistant_model": "<synthetic>",
+  "tools": [],
+  "mcp_servers": [],
+  "permission_mode": "default",
+  "stop_reason": "PRE_RESPONSE_TRANSPORT_FAILURE",
+  "is_infra_failure": true,
+  "response_delivered": false,
+  "final_bridge_classification": "PRE_RESPONSE_TRANSPORT_FAILURE",
+  "transport_attempts": [
+    {
+      "attempt_number": 1,
+      "manifest_path": "/home/volmax-studio/volmax-projects/iot2/PORTFOLIO/representation-lifting-s1/evidence/amendment_a1/r9_execution/gate5/transport_attempts/turn_0/attempt_1/attempt_metadata.json",
+      "manifest_sha256": "c59e03e980ec19911e37a7acebb3540cf9b7b54bf36d0f01fcb141ac44f84ab9",
+      "classification": "PRE_RESPONSE_TRANSPORT_FAILURE",
+      "response_delivered": false
+    }
+  ],
+  "attempts_used": 1,
+  "frozen_max_attempts": 1,
+  "retry_exhausted": true,
+  "sha256": "01e1a9c362eaa9051cf9adb45bb9bad0f010b3a9268c1cf232ff40599175c54f"
+}

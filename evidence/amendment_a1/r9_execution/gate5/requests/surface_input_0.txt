@@ -1,0 +1,2 @@
+Respond with exactly the following JSON and nothing else:
+{"status": "ok", "probe": "representation-lifting-s1-gate5"}
