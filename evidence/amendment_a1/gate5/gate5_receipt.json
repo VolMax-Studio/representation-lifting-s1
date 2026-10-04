@@ -1,0 +1,69 @@
+{
+  "gate": "Gate 5",
+  "name": "Neutral Pre-Execution Surface Verification",
+  "amendment": "A1",
+  "timestamp_utc": "2026-10-04T14:13:14Z",
+  "gate5_pass": true,
+  "model_requested": "claude-sonnet-4-6",
+  "model_returned": "claude-sonnet-4-6",
+  "assistant_model": "claude-sonnet-4-6",
+  "tools": [],
+  "mcp_servers": [],
+  "permission_mode": "default",
+  "response_text": "{\"status\": \"ok\", \"probe\": \"representation-lifting-s1-gate5\"}",
+  "response_stripped": "{\"status\": \"ok\", \"probe\": \"representation-lifting-s1-gate5\"}",
+  "expected": "{\"status\": \"ok\", \"probe\": \"representation-lifting-s1-gate5\"}",
+  "exact_match": true,
+  "failure_reason": null,
+  "request_envelope_path": "evidence/amendment_a1/gate5/requests/request_0.json",
+  "request_envelope_sha256": "bd63e184dd806f77d87423be6d969a724f550c547edf2efd03bf6e6c486e8797",
+  "surface_input_path": "evidence/amendment_a1/gate5/requests/surface_input_0.txt",
+  "surface_input_sha256": "802b2921b6b5e51b549e74294ee22a5bca57c14a91db2dea32e46b8017885f20",
+  "response_path": "evidence/amendment_a1/gate5/responses/response_0.txt",
+  "response_sha256": "909e8768eec426ae952ec3993c074a750e4724bdf644dad21f28366c0d620523",
+  "transcript": [
+    {
+      "event": "a1_bridge_request_emitted",
+      "path": "/home/volmax-studio/volmax-projects/iot2/PORTFOLIO/representation-lifting-s1/tools/../evidence/amendment_a1/gate5/requests/request_0.json",
+      "sha256": "bd63e184dd806f77d87423be6d969a724f550c547edf2efd03bf6e6c486e8797"
+    },
+    {
+      "event": "a1_bridge_surface_input_emitted",
+      "path": "/home/volmax-studio/volmax-projects/iot2/PORTFOLIO/representation-lifting-s1/tools/../evidence/amendment_a1/gate5/requests/surface_input_0.txt",
+      "sha256": "802b2921b6b5e51b549e74294ee22a5bca57c14a91db2dea32e46b8017885f20",
+      "system_role_handling": "NATIVE_SYSTEM_MESSAGE"
+    },
+    {
+      "event": "a1_bridge_transport_attempt",
+      "attempt": 1
+    },
+    {
+      "event": "a1_bridge_cli_invocation",
+      "model_requested": "claude-sonnet-4-6",
+      "effort": "high",
+      "timeout_seconds": 118.0
+    },
+    {
+      "event": "a1_bridge_cli_init",
+      "model_returned": "claude-sonnet-4-6",
+      "tools": [],
+      "mcp_servers": [],
+      "permission_mode": "default",
+      "cwd": "/tmp/representation_lifting_a1_u3lg5y81"
+    },
+    {
+      "event": "a1_bridge_cli_success",
+      "returncode": 0,
+      "response_length": 60,
+      "model_returned": "claude-sonnet-4-6",
+      "assistant_model": "claude-sonnet-4-6",
+      "stop_reason": "end_turn"
+    },
+    {
+      "event": "a1_bridge_response_emitted",
+      "path": "/home/volmax-studio/volmax-projects/iot2/PORTFOLIO/representation-lifting-s1/tools/../evidence/amendment_a1/gate5/responses/response_0.txt",
+      "sha256": "909e8768eec426ae952ec3993c074a750e4724bdf644dad21f28366c0d620523",
+      "response_length": 60
+    }
+  ]
+}
