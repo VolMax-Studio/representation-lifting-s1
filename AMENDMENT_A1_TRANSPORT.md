@@ -1,7 +1,8 @@
-## Amendment 0.21-A1 r8: Pre-Execution Surface Amendment
+## Amendment 0.21-A1 r9: Transport-Evidence Remediation
 
-**Status:** CANDIDATE (r8) — remediates findings F5–F7 from independent review
-of commit 4eed7b6; requires fresh independent review of exact candidate commit
+**Status:** CANDIDATE (r9) — narrowly remediates the synthetic/error-envelope
+instrumentation defect observed during the first post-ratification r8 execution;
+requires fresh independent review of the exact r9 candidate commit
 and signed annotated tag ratification BEFORE Gate 5, and BEFORE any executor
 sees blind theorem content  
 **Amendment class:** Execution-surface  
@@ -11,7 +12,7 @@ billing endpoints. The frozen v0.21 `executor_config.json` and
 `smoke_test_executor.py` require direct paid API access with
 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`, making Gate 5 and all subsequent
 execution impossible under the frozen transport specification.  
-**Date:** 2026-10-02  
+**Date:** 2026-10-04
 **Author:** Ivan Nestorov (principal investigator)  
 
 ---
@@ -33,6 +34,14 @@ mechanisms:
 4. **Transcript and operator mechanics:** The method of capturing prompts,
    responses, and timing (programmatic JSON extraction → hash-addressed
    canonical artifacts with semi-manual faithful-courier relay).
+
+Candidate r9 changes only transport-error classification and evidence custody:
+provider/client error semantics are resolved before ordinary assistant-model
+identity enforcement; raw per-attempt evidence is preserved immutably; and the
+response-artifact audit distinguishes delivered responses from proven
+pre-response failures. It does not change any scientific hypothesis, model,
+target, selection, prompt, budget, admissibility rule, scoring rule, or frozen
+executor setting.
 
 These changes may affect realized model behavior: a subscription surface
 interposes provider-controlled runtime context (system prompt wrappers, tool
@@ -499,6 +508,25 @@ that turn.
 
 **A1.12.4** Every retry and its cause logged with UTC timestamps.
 
+**A1.12.5 Synthetic/error-envelope ordering (r9):** Claude CLI stream events
+MUST be preserved before semantic classification. Provider/client error evidence
+(`isApiErrorMessage == true`, `result.is_error == true`, an explicit
+machine-readable error object/marker, or equivalent documented error signal) is
+resolved before ordinary assistant-model identity enforcement. The literal model
+label `<synthetic>` alone is insufficient: without accompanying objective error
+evidence it fails closed as `SYNTHETIC_WITHOUT_ERROR_EVIDENCE` and is not accepted
+as the pinned model.
+
+**A1.12.6 Retry eligibility (r9):** If objective machine-readable evidence proves
+a client/provider/transport failure and no admissible model response content was
+delivered, the attempt is the existing retryable pre-response transport-failure
+category. It may consume only the next attempt already permitted by the frozen
+`tools/executor_config.json` policy. A delivered model response is final for the
+turn even if it later fails semantic, proof, or compiler verification. A genuine
+delivered response from a non-allowed model remains `MODEL_IDENTITY_FAIL` and is
+not retried to shop for a desired model. Exhaustion of the frozen attempt budget
+produces the existing `INFRA_FAILURE`; it never authorizes whole-case resampling.
+
 ---
 
 ### A1.13 Human Operator Protocol (Semi-Manual Execution)
@@ -542,6 +570,8 @@ Key fields:
 - all surface versions, allowed_model_labels, inference_controls_pinned,
   tool_capabilities, flattening_scheme
 - degradations_introduced_by_a1 (collected list of all DEGRADED_* flags)
+- execution_evidence_namespace (`r9_execution`, distinct from preserved r8 evidence)
+- transport_attempt_evidence_schema and response_artifact_semantics
 
 ---
 
@@ -564,21 +594,35 @@ inference-control settings, response exact-match.
 Each execution session under A1 (blind transfer, negative control, and calibration families) MUST produce:
 
 1. Hash-addressed artifacts per turn — `request_N.json` + `surface_input_N.txt` +
-   `transport_metadata_N.json` + `response_N.txt`, each with companion `.sha256` (sections A1.8, A1.17).
+   `transport_metadata_N.json`, each with companion `.sha256` (sections A1.8, A1.17).
    Turn transport metadata MUST record provider-emitted init model, assistant model, tools,
-   mcp_servers, permission_mode, and stop_reason.
-2. Sealed transcript per branch — assembled from turn artifacts, SHA-256 hashed on branch
+   mcp_servers, permission_mode, stop_reason, every attempt-manifest hash, response-delivery
+   state, final bridge classification, attempts used, frozen maximum attempts, and whether
+   the retry budget was exhausted.
+2. Immutable per-attempt evidence under
+   `transport_attempts/turn_N/attempt_M/`, including hash-addressed raw stdout stream,
+   raw stderr, CLI return code, parsed init/assistant model, machine-readable error markers,
+   tool/MCP/permission metadata, response-delivery state, and final classification. Attempt
+   M MUST NOT overwrite any earlier attempt. Known credential-shaped material is redacted
+   before persistence and the redaction fact is recorded.
+3. `response_N.txt` with companion SHA-256 is REQUIRED for every delivered model response,
+   including empty text and responses rejected for model identity. For a proven pre-response
+   transport failure it MUST NOT be fabricated. Missing response evidence is admissible only
+   when the hash-bound final attempt and turn metadata prove both
+   `PRE_RESPONSE_TRANSPORT_FAILURE` and `response_delivered = false`. Missing both a response
+   and sufficient failure evidence is a custody HALT.
+4. Sealed transcript per branch — assembled from all turn and attempt artifacts, SHA-256 hashed on branch
    completion (section A1.7.3), with zero cross-case or cross-branch namespace overlap:
    - blind transfer: D, S, L;
    - negative control: D, L;
    - calibration families: D1, D2, S1, L1, S2, L2.
-3. Model label captures and observed evidence — screenshot/terminal at session start;
+5. Model label captures and observed evidence — screenshot/terminal at session start;
    receipt model identity fields (`model_label_displayed`, `model_label_in_allowed_set`)
    MUST be derived strictly from preserved observed provider transport metadata artifacts,
    not from requested model identifiers, failing closed on mismatch.
-4. Surface metadata — type, version, and frozen plan tier (`Pro` for primary Claude Code CLI,
+6. Surface metadata — type, version, and frozen plan tier (`Pro` for primary Claude Code CLI,
    `Plus (OpenAI Subscription) -- REPLICATION_DEFERRED` for replication).
-5. Execution receipt — JSON per representation-lifting-execution-receipt/v1 with
+7. Execution receipt — JSON per representation-lifting-execution-receipt/v1 with
    additional A1 fields across all evaluation arms: `transport_amendment`, `transport_surface`,
    `surface_metadata`, `model_identity_evidence`, `model_label_displayed`, `model_label_in_allowed_set`,
    `a1_transport_config_sha256`, `bridge_sha256`, `bridge_activate_sha256`, `inference_controls`,
@@ -588,24 +632,21 @@ Each execution session under A1 (blind transfer, negative control, and calibrati
 
 ### A1.18 Ratification Chain
 
-```
-Pre-ratification surface reconnaissance (section A1.3)
-  -- NO inference prompt, NO blind content
-  -- populate a1_transport_config.json completely
-  -- implement tools/a1_surface_bridge.py
-  -- implement tests/test_a1_surface_bridge.py
--> Candidate commit (r8):
+```text
+Preserved r8 deviation: INVALID_INSTRUMENTATION_PRE_OUTCOME
+  -- no r8 receipt admissible for H0/H1/H2
+  -- no r8 result may supplement or rescue r9
+-> Candidate commit (r9):
     AMENDMENT_A1_TRANSPORT.md
+    evidence/amendment_a1/DEVIATION_R8_SYNTHETIC_TRANSPORT_FAILURE.md
     evidence/amendment_a1/a1_transport_config.json
     tools/a1_surface_bridge.py
     tools/a1_activate.py
     tests/test_a1_surface_bridge.py
-    tools/prepare_blind_targets.py
-    tests/test_prepare_blind_targets.py
--> Independent review of exact candidate commit
--> Ivan Nestorov: signed annotated git tag on reviewed commit
--> Gate 5 (section A1.11) -- verifies frozen config, sends neutral probe
-    -> PASS: proceed to S/D/L execution
+-> Fresh independent review of exact r9 candidate commit
+-> Ivan Nestorov: new signed annotated ratification tag on reviewed r9 commit
+-> Fresh Gate 5 (section A1.11)
+    -> PASS: restart the complete block from negative control, then frozen calibration and blind order
     -> FAIL: BLOCKED (NOT_EVALUABLE_INFRA)
 ```
 
@@ -633,6 +674,16 @@ The following remain identical to frozen v0.21:
 - Scoring, aggregation, control veto, verdict governance
 - Pool, anchor, selection custody, tools/analyze.py
 - tools/executor_config.json, tools/executor_harness.py (both frozen, unmodified)
+
+### A1.19.1 r8 Invalid-Instrumentation Boundary
+
+The first post-ratification r8 block is classified
+`INVALID_INSTRUMENTATION_PRE_OUTCOME` in
+`evidence/amendment_a1/DEVIATION_R8_SYNTHETIC_TRANSPORT_FAILURE.md`. Existing r8
+evidence is preserved and never overwritten. Candidate r9 uses the distinct
+`r9_execution` evidence namespace. After r9 review, human ratification, and Gate 5,
+the entire block restarts from negative control using the same model, cases,
+families, and order, with no resampling and no carry-forward of any r8 result.
 
 ---
 

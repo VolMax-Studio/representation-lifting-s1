@@ -136,7 +136,7 @@ class TestA1SurfaceBridge(unittest.TestCase):
         """Bridge returns exact (str, str|None, bool) tuple — same as original."""
         cfg = _make_native_surface_config(self.tmp)
 
-        def mock_cli(si_path, sc, sp, rw, tr):
+        def mock_cli(si_path, sc, sp, rw, tr, **kwargs):
             return "mock response text", "end_turn", False
 
         with patch.object(bridge, "_relay_claude_code_cli", side_effect=mock_cli):
@@ -168,7 +168,7 @@ class TestA1SurfaceBridge(unittest.TestCase):
         sp = "Test system prompt"
         msgs = [{"role": "user", "content": "Test user content"}]
 
-        def mock_cli(si_path, sc, s, rw, tr):
+        def mock_cli(si_path, sc, s, rw, tr, **kwargs):
             return "resp", "end_turn", False
 
         with patch.object(bridge, "_relay_claude_code_cli", side_effect=mock_cli):
@@ -348,7 +348,7 @@ class TestA1SurfaceBridge(unittest.TestCase):
         cfg = _make_native_surface_config(self.tmp)
         lean_invoked = []
 
-        def mock_cli(si_path, sc, sp, rw, tr):
+        def mock_cli(si_path, sc, sp, rw, tr, **kwargs):
             # Simulate bridge calling Lean — this must NOT happen
             lean_invoked.append(True)
             return "resp", "end_turn", False
@@ -456,7 +456,7 @@ class TestA1SurfaceBridge(unittest.TestCase):
         ]
         call_idx = [0]
 
-        def mock_cli(si_path, sc, sp, rw, tr):
+        def mock_cli(si_path, sc, sp, rw, tr, **kwargs):
             idx = call_idx[0]
             call_idx[0] += 1
             if idx < len(responses):
@@ -515,7 +515,7 @@ class TestA1SurfaceBridge(unittest.TestCase):
         """A pre-response infra failure may retry within frozen max-attempts budget."""
         cfg = _make_native_surface_config(self.tmp)
         calls = []
-        def fake_cli(*args):
+        def fake_cli(*args, **kwargs):
             calls.append(1)
             return ("", None, True) if len(calls) == 1 else ("OK", "end_turn", False)
         transport_cfg = {"transport_policy": {"max_attempts_per_turn": 3, "backoff_seconds": [0, 0]}}
@@ -543,7 +543,7 @@ class TestA1SurfaceBridge(unittest.TestCase):
     def test_bridge_does_not_retry_nonretryable_model_identity_failure(self):
         cfg = _make_native_surface_config(self.tmp)
         calls = []
-        def fake_cli(*args):
+        def fake_cli(*args, **kwargs):
             calls.append(1)
             return "", "MODEL_IDENTITY_FAIL", True
         transport_cfg = {"transport_policy": {"max_attempts_per_turn": 3, "backoff_seconds": [0, 0]}}
@@ -592,7 +592,238 @@ class TestA1SurfaceBridge(unittest.TestCase):
         fake = MagicMock(returncode=0, stdout=stdout, stderr="")
         with patch.object(bridge.subprocess, "run", return_value=fake):
             out = bridge._relay_claude_code_cli(inp, sc, "SYS", 60.0, [])
-        self.assertEqual(out, ("", "MODEL_IDENTITY_FAIL", True))
+        self.assertEqual(out, ("OK", "MODEL_IDENTITY_FAIL", True))
+
+    def _stream_result(self, *, assistant_model="claude-sonnet-4-6",
+                       result="OK", result_is_error=False,
+                       api_error=False, error=None, assistant_content=None):
+        assistant = {
+            "type": "assistant",
+            "message": {"model": assistant_model, "stop_reason": "end_turn"},
+        }
+        if assistant_content is not None:
+            assistant["message"]["content"] = [{"type": "text", "text": assistant_content}]
+        if api_error:
+            assistant["isApiErrorMessage"] = True
+        if error is not None:
+            assistant["error"] = error
+        result_event = {
+            "type": "result", "subtype": "error" if result_is_error else "success",
+            "is_error": result_is_error, "result": result,
+        }
+        if error is not None:
+            result_event["error"] = error
+        return "\n".join([
+            json.dumps({"type": "system", "subtype": "init",
+                        "model": "claude-sonnet-4-6", "tools": [],
+                        "mcp_servers": [], "permissionMode": "default", "cwd": "/tmp/x"}),
+            json.dumps(assistant),
+            json.dumps(result_event),
+        ])
+
+    def test_r9_normal_response_preserves_attempt_and_response(self):
+        cfg = _make_native_surface_config(self.tmp)
+        cfg["surfaces"]["primary"]["allowed_model_labels"] = ["claude-sonnet-4-6"]
+        fake = MagicMock(returncode=0, stdout=self._stream_result(), stderr="")
+        with patch.object(bridge.subprocess, "run", return_value=fake):
+            out = bridge.a1_call_surface(
+                "claude-sonnet-4-6", [{"role": "user", "content": "x"}],
+                "sys", 60.0, {"transport_policy": {"max_attempts_per_turn": 3, "backoff_seconds": [0, 0]}},
+                [], a1_config=cfg, artifact_dir=self.tmp, turn_number=0,
+            )
+        self.assertEqual(out, ("OK", "end_turn", False))
+        self.assertTrue(os.path.isfile(os.path.join(self.tmp, "responses", "response_0.txt")))
+        self.assertTrue(os.path.isfile(os.path.join(
+            self.tmp, "transport_attempts", "turn_0", "attempt_1", "attempt_metadata.json")))
+        self.assertTrue(bridge.validate_turn_transport_custody(self.tmp, 0)["custody_pass"])
+
+    def test_r9_synthetic_api_error_is_retryable_pre_response(self):
+        inp = os.path.join(self.tmp, "surface.txt")
+        with open(inp, "w", encoding="utf-8") as f:
+            f.write("hello")
+        sc = _make_native_surface_config(self.tmp)["surfaces"]["primary"]
+        sc["allowed_model_labels"] = ["claude-sonnet-4-6"]
+        fake = MagicMock(
+            returncode=1,
+            stdout=self._stream_result(
+                assistant_model="<synthetic>", result="API error", result_is_error=True,
+                api_error=True, error="rate_limit",
+            ),
+            stderr="",
+        )
+        attempt_dir = os.path.join(self.tmp, "attempt")
+        with patch.object(bridge.subprocess, "run", return_value=fake):
+            out = bridge._relay_claude_code_cli(
+                inp, sc, "SYS", 60.0, [], attempt_dir=attempt_dir,
+                turn_number=0, attempt_number=1,
+            )
+        self.assertEqual(out, ("", None, True))
+        with open(os.path.join(attempt_dir, "attempt_metadata.json"), encoding="utf-8") as f:
+            manifest = json.load(f)
+        self.assertEqual(manifest["final_bridge_classification"], "PRE_RESPONSE_TRANSPORT_FAILURE")
+        self.assertFalse(manifest["response_delivered"])
+
+    def test_r9_synthetic_without_error_evidence_fails_closed(self):
+        inp = os.path.join(self.tmp, "surface.txt")
+        with open(inp, "w", encoding="utf-8") as f:
+            f.write("hello")
+        sc = _make_native_surface_config(self.tmp)["surfaces"]["primary"]
+        fake = MagicMock(
+            returncode=0,
+            stdout=self._stream_result(assistant_model="<synthetic>", result="synthetic"),
+            stderr="",
+        )
+        with patch.object(bridge.subprocess, "run", return_value=fake):
+            out = bridge._relay_claude_code_cli(
+                inp, sc, "SYS", 60.0, [], attempt_dir=os.path.join(self.tmp, "attempt"),
+            )
+        self.assertEqual(out, ("", "SYNTHETIC_WITHOUT_ERROR_EVIDENCE", True))
+
+    def test_r9_result_error_precedes_synthetic_identity_rejection(self):
+        inp = os.path.join(self.tmp, "surface.txt")
+        with open(inp, "w", encoding="utf-8") as f:
+            f.write("hello")
+        sc = _make_native_surface_config(self.tmp)["surfaces"]["primary"]
+        fake = MagicMock(
+            returncode=1,
+            stdout=self._stream_result(
+                assistant_model="<synthetic>", result="", result_is_error=True,
+            ), stderr="",
+        )
+        with patch.object(bridge.subprocess, "run", return_value=fake):
+            out = bridge._relay_claude_code_cli(
+                inp, sc, "SYS", 60.0, [], attempt_dir=os.path.join(self.tmp, "attempt"),
+            )
+        self.assertEqual(out, ("", None, True))
+
+    def test_r9_genuine_assistant_model_mismatch_remains_fail_closed(self):
+        inp = os.path.join(self.tmp, "surface.txt")
+        with open(inp, "w", encoding="utf-8") as f:
+            f.write("hello")
+        sc = _make_native_surface_config(self.tmp)["surfaces"]["primary"]
+        fake = MagicMock(
+            returncode=0,
+            stdout=self._stream_result(assistant_model="other-model", result="answer"),
+            stderr="",
+        )
+        with patch.object(bridge.subprocess, "run", return_value=fake):
+            out = bridge._relay_claude_code_cli(
+                inp, sc, "SYS", 60.0, [], attempt_dir=os.path.join(self.tmp, "attempt"),
+            )
+        self.assertEqual(out, ("answer", "MODEL_IDENTITY_FAIL", True))
+
+    def test_r9_retry_exhaustion_preserves_exactly_three_attempts(self):
+        cfg = _make_native_surface_config(self.tmp)
+        error_stream = self._stream_result(
+            assistant_model="<synthetic>", result="", result_is_error=True,
+            api_error=True, error="rate_limit",
+        )
+        fake = MagicMock(returncode=1, stdout=error_stream, stderr="")
+        policy = {"transport_policy": {"max_attempts_per_turn": 3, "backoff_seconds": [0, 0]}}
+        with patch.object(bridge.subprocess, "run", return_value=fake) as run:
+            out = bridge.a1_call_surface(
+                "claude-sonnet-4-6", [{"role": "user", "content": "x"}],
+                "sys", 60.0, policy, [], a1_config=cfg,
+                artifact_dir=self.tmp, turn_number=0,
+            )
+        self.assertEqual(out, ("", None, True))
+        self.assertEqual(run.call_count, 3)
+        for attempt in (1, 2, 3):
+            self.assertTrue(os.path.isfile(os.path.join(
+                self.tmp, "transport_attempts", "turn_0", f"attempt_{attempt}",
+                "attempt_metadata.json")))
+        self.assertFalse(os.path.exists(os.path.join(
+            self.tmp, "transport_attempts", "turn_0", "attempt_4")))
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "responses", "response_0.txt")))
+        self.assertTrue(bridge.validate_turn_transport_custody(self.tmp, 0)["custody_pass"])
+
+    def test_r9_recovery_preserves_failed_and_successful_attempts(self):
+        cfg = _make_native_surface_config(self.tmp)
+        error = MagicMock(
+            returncode=1,
+            stdout=self._stream_result(
+                assistant_model="<synthetic>", result="", result_is_error=True,
+                api_error=True, error="rate_limit",
+            ), stderr="",
+        )
+        success = MagicMock(returncode=0, stdout=self._stream_result(result="OK"), stderr="")
+        policy = {"transport_policy": {"max_attempts_per_turn": 3, "backoff_seconds": [0, 0]}}
+        with patch.object(bridge.subprocess, "run", side_effect=[error, success]) as run:
+            out = bridge.a1_call_surface(
+                "claude-sonnet-4-6", [{"role": "user", "content": "x"}],
+                "sys", 60.0, policy, [], a1_config=cfg,
+                artifact_dir=self.tmp, turn_number=0,
+            )
+        self.assertEqual(out, ("OK", "end_turn", False))
+        self.assertEqual(run.call_count, 2)
+        for attempt in (1, 2):
+            self.assertTrue(os.path.isfile(os.path.join(
+                self.tmp, "transport_attempts", "turn_0", f"attempt_{attempt}",
+                "attempt_metadata.json")))
+        self.assertTrue(bridge.validate_turn_transport_custody(self.tmp, 0)["custody_pass"])
+
+    def test_r9_delivered_semantic_failure_is_not_transport_resampled(self):
+        cfg = _make_native_surface_config(self.tmp)
+        fake = MagicMock(returncode=0, stdout=self._stream_result(result="not a valid proof"), stderr="")
+        policy = {"transport_policy": {"max_attempts_per_turn": 3, "backoff_seconds": [0, 0]}}
+        with patch.object(bridge.subprocess, "run", return_value=fake) as run:
+            out = bridge.a1_call_surface(
+                "claude-sonnet-4-6", [{"role": "user", "content": "x"}],
+                "sys", 60.0, policy, [], a1_config=cfg,
+                artifact_dir=self.tmp, turn_number=0,
+            )
+        self.assertEqual(out, ("not a valid proof", "end_turn", False))
+        self.assertEqual(run.call_count, 1)
+
+    def test_r9_missing_response_without_failure_evidence_fails_custody(self):
+        cfg = _make_native_surface_config(self.tmp)
+        fake = MagicMock(returncode=0, stdout=self._stream_result(result="OK"), stderr="")
+        with patch.object(bridge.subprocess, "run", return_value=fake):
+            bridge.a1_call_surface(
+                "claude-sonnet-4-6", [{"role": "user", "content": "x"}],
+                "sys", 60.0, {"transport_policy": {"max_attempts_per_turn": 1}},
+                [], a1_config=cfg, artifact_dir=self.tmp, turn_number=0,
+            )
+        os.remove(os.path.join(self.tmp, "responses", "response_0.txt"))
+        os.remove(os.path.join(self.tmp, "responses", "response_0.txt.sha256"))
+        audit = bridge.validate_turn_transport_custody(self.tmp, 0)
+        self.assertFalse(audit["custody_pass"])
+        self.assertIn("DELIVERED_RESPONSE_ARTIFACT_REQUIRED", audit["failure_reasons"])
+
+    def test_r9_branch_seal_covers_every_attempt_artifact(self):
+        import tarfile
+        import tools.a1_activate as a1_act
+
+        cfg = _make_native_surface_config(self.tmp)
+        error = MagicMock(
+            returncode=1,
+            stdout=self._stream_result(
+                assistant_model="<synthetic>", result="", result_is_error=True,
+                api_error=True, error="rate_limit",
+            ), stderr="",
+        )
+        success = MagicMock(returncode=0, stdout=self._stream_result(result="OK"), stderr="")
+        policy = {"transport_policy": {"max_attempts_per_turn": 3, "backoff_seconds": [0, 0]}}
+        with patch.object(bridge.subprocess, "run", side_effect=[error, success]):
+            bridge.a1_call_surface(
+                "claude-sonnet-4-6", [{"role": "user", "content": "x"}],
+                "sys", 60.0, policy, [], a1_config=cfg,
+                artifact_dir=self.tmp, turn_number=0,
+            )
+        seal = os.path.join(self.tmp, "sealed.tar")
+        _, _, files = a1_act.seal_branch_transcript(self.tmp, seal)
+        required = {
+            f"transport_attempts/turn_0/attempt_{attempt}/{name}"
+            for attempt in (1, 2)
+            for name in (
+                "raw_stdout.stream.jsonl", "raw_stdout.stream.jsonl.sha256",
+                "raw_stderr.txt", "raw_stderr.txt.sha256",
+                "attempt_metadata.json", "attempt_metadata.json.sha256",
+            )
+        }
+        self.assertTrue(required.issubset(set(files)))
+        with tarfile.open(seal, "r") as archive:
+            self.assertTrue(required.issubset(set(archive.getnames())))
 
     # ------------------------------------------------------------------
     # 14. Frozen harness SHA-256 unchanged

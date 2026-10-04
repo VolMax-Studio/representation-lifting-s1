@@ -11,7 +11,7 @@ Guarantees provided:
   1. Inference interception: call_model_api_with_resilience -> a1_call_surface.
   2. Branch artifact isolation (§A1.17, Finding F3):
      turn artifacts are partitioned by case and role:
-     evidence/amendment_a1/artifacts/{case_id}/{role}/
+     evidence/amendment_a1/r9_execution/artifacts/{case_id}/{role}/
      (requests/request_N.json, requests/surface_input_N.txt, responses/response_N.txt)
      Eliminates any cross-role or cross-case overwrite risk.
   3. Branch transcript sealing (§A1.7.3, Finding F1):
@@ -122,7 +122,7 @@ def configure(
 ) -> None:
     """
     Optionally configure custom paths for A1 activation.
-    Defaults to canonical paths under evidence/amendment_a1/.
+    Defaults to the config-pinned r9 namespace under evidence/amendment_a1/.
     """
     global _A1_CONFIG_PATH, _A1_CONFIG, _BASE_ARTIFACT_DIR, _SEALED_DIR, _RECEIPT_DIR
     _A1_CONFIG_PATH = a1_config_path
@@ -143,21 +143,24 @@ def _get_base_artifact_dir() -> str:
     global _BASE_ARTIFACT_DIR
     if _BASE_ARTIFACT_DIR is not None:
         return _BASE_ARTIFACT_DIR
-    return os.path.join(_ROOT_DIR, "evidence", "amendment_a1", "artifacts")
+    namespace = _get_a1_config().get("execution_evidence_namespace", "r9_execution")
+    return os.path.join(_ROOT_DIR, "evidence", "amendment_a1", namespace, "artifacts")
 
 
 def _get_sealed_dir() -> str:
     global _SEALED_DIR
     if _SEALED_DIR is not None:
         return _SEALED_DIR
-    return os.path.join(_ROOT_DIR, "evidence", "amendment_a1", "sealed_transcripts")
+    namespace = _get_a1_config().get("execution_evidence_namespace", "r9_execution")
+    return os.path.join(_ROOT_DIR, "evidence", "amendment_a1", namespace, "sealed_transcripts")
 
 
 def _get_receipt_dir() -> str:
     global _RECEIPT_DIR
     if _RECEIPT_DIR is not None:
         return _RECEIPT_DIR
-    return os.path.join(_ROOT_DIR, "evidence", "amendment_a1", "receipts")
+    namespace = _get_a1_config().get("execution_evidence_namespace", "r9_execution")
+    return os.path.join(_ROOT_DIR, "evidence", "amendment_a1", namespace, "receipts")
 
 
 # ---------------------------------------------------------------------------
@@ -388,6 +391,10 @@ def _extract_observed_model_evidence(case_id: str, branch_labels: list[str]) -> 
                                 ret_model = mdata.get("model_returned")
                                 if ret_model:
                                     observed_models.append(ret_model)
+                                assistant_model = mdata.get("assistant_model")
+                                if (mdata.get("response_delivered") is not False
+                                        and assistant_model):
+                                    observed_models.append(assistant_model)
                         except Exception:
                             pass
 

@@ -1,11 +1,17 @@
 {
   "schema_version": "representation-lifting-a1-transport/v1",
   "amendment": "A1",
+  "candidate_revision": "r9",
+  "execution_evidence_namespace": "r9_execution",
+  "transport_attempt_evidence_schema": "representation-lifting-a1-transport-attempt/v1",
+  "response_artifact_semantics": "REQUIRED_IF_DELIVERED__ABSENT_ONLY_WITH_HASH_BOUND_PRE_RESPONSE_FAILURE",
+  "r8_execution_disposition": "INVALID_INSTRUMENTATION_PRE_OUTCOME",
+  "r8_deviation_record": "evidence/amendment_a1/DEVIATION_R8_SYNTHETIC_TRANSPORT_FAILURE.md",
   "supersedes_transport_in": "tools/executor_config.json",
   "frozen_executor_config_sha256": "395deb97fa2b038a93ce416ced4ce3bcba31cddea30db7f3daa5ee5bc01f4b04",
   "frozen_executor_harness_sha256": "ccb1cad202fcdd2dbd931c3b8c5d65d9d368a0bdb26da8946e9b8671b07d8c48",
-  "bridge_sha256": "a18ebd053a6ce8a0d257b76ff0d64bf73d17227558c0296ae36ae425f8e14285",
-  "bridge_tests_sha256": "e345a5802492de69c49765e730f920dac3430b1b5a50cc705ea8abb1be78438d",
+  "bridge_sha256": "df458e86c7d0aeaffa1633ed07e90b6d88aff0a3c83afaa2dbd7c5b83799986f",
+  "bridge_tests_sha256": "f5055efcf4e84ca7a1469e5e3377487e58ec0482df4a255c5aa58c9c11c0881d",
   "reconnaissance_timestamp_utc": "2026-10-03T06:51:50Z",
   "surfaces": {
     "primary": {
@@ -90,8 +96,8 @@
   ],
   "fields_requiring_ivan_reconnaissance": [],
   "status": "PRIMARY_READY_FOR_REVIEW__REPLICATION_NOT_EVALUABLE_INFRA_DEFERRED",
-  "bridge_activate_sha256": "a23581ff50f6903c5211669923aebaaaadf2641f3926348f94ba98af0b7279fb",
+  "bridge_activate_sha256": "219667022aa1984ac7334294b8b491f2d0131ebee8e82417de14f8baf88e56b5",
   "target_preparer_sha256": "e432a9442edd1b4407d4da316447ace4b7c19bad744241f0cf7a144354f53f41",
   "target_preparer_tests_sha256": "500b50842c809e597f6553deaa8825fddc17958fe1eb16c9df6672eaba32d870",
-  "amendment_text_sha256": "466b1a57a6987e496a9e32ae219a615107cb132bde04e773614280de6607d52e"
+  "amendment_text_sha256": "173913147c3ff70e6b861e931d94cbf8b92600facee85d58767f17f2d625c0a3"
 }

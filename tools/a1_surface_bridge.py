@@ -44,10 +44,12 @@ import subprocess
 import time
 import shutil
 import tempfile
+import re
 from datetime import datetime, timezone
 from typing import Optional
 
 REQUEST_SCHEMA_VERSION = "representation-lifting-a1-request/v1"
+ATTEMPT_SCHEMA_VERSION = "representation-lifting-a1-transport-attempt/v1"
 
 
 # ---------------------------------------------------------------------------
@@ -249,6 +251,102 @@ def emit_transport_metadata(
     return path, sha
 
 
+def _write_hash_addressed_bytes(path: str, data: bytes) -> tuple[str, str]:
+    """Create an immutable evidence file and companion SHA-256 file."""
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    digest = _sha256_bytes(data)
+    with open(path, "xb") as f:
+        f.write(data)
+    with open(path + ".sha256", "x", encoding="utf-8") as f:
+        f.write(f"{digest}  {os.path.basename(path)}\n")
+    return path, digest
+
+
+def _redact_transport_secrets(text: str) -> tuple[str, bool]:
+    """Redact credential-shaped material while otherwise preserving raw CLI streams."""
+    patterns = [
+        (re.compile(r"(?i)(authorization\s*[:=]\s*bearer\s+)[^\s\"']+"), r"\1[REDACTED]"),
+        (re.compile(r"\bsk-ant-[A-Za-z0-9_-]{12,}\b"), "[REDACTED_ANTHROPIC_TOKEN]"),
+        (re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"), "[REDACTED_API_TOKEN]"),
+    ]
+    redacted = text
+    changed = False
+    for pattern, replacement in patterns:
+        redacted, count = pattern.subn(replacement, redacted)
+        changed = changed or bool(count)
+    return redacted, changed
+
+
+def _safe_error_fields(event: Optional[dict]) -> dict:
+    """Retain machine-readable error metadata without copying response/content bodies."""
+    if not isinstance(event, dict):
+        return {}
+    permitted = (
+        "type", "subtype", "error", "error_type", "code", "status",
+        "status_code", "is_error", "isApiErrorMessage",
+    )
+    out = {}
+    for key in permitted:
+        value = event.get(key)
+        if value is None:
+            continue
+        if isinstance(value, (str, int, float, bool)):
+            out[key] = value
+        elif isinstance(value, dict):
+            out[key] = {
+                k: v for k, v in value.items()
+                if k in ("type", "code", "status", "status_code")
+                and isinstance(v, (str, int, float, bool))
+            }
+    return out
+
+
+def _emit_attempt_raw(attempt_dir: str, stdout_text: str, stderr_text: str) -> dict:
+    """Persist raw streams immediately, before parsing or semantic classification."""
+    stdout_text, stdout_redacted = _redact_transport_secrets(stdout_text)
+    stderr_text, stderr_redacted = _redact_transport_secrets(stderr_text)
+    stdout_path, stdout_sha = _write_hash_addressed_bytes(
+        os.path.join(attempt_dir, "raw_stdout.stream.jsonl"), stdout_text.encode("utf-8")
+    )
+    stderr_path, stderr_sha = _write_hash_addressed_bytes(
+        os.path.join(attempt_dir, "raw_stderr.txt"), stderr_text.encode("utf-8")
+    )
+    return {
+        "raw_stdout": {"path": os.path.basename(stdout_path), "sha256": stdout_sha},
+        "raw_stderr": {"path": os.path.basename(stderr_path), "sha256": stderr_sha},
+        "redactions_applied": bool(stdout_redacted or stderr_redacted),
+    }
+
+
+def _emit_attempt_manifest(
+    attempt_dir: str,
+    *,
+    turn_number: int,
+    attempt_number: int,
+    raw_evidence: dict,
+    returncode: Optional[int],
+    parsed: dict,
+    classification: str,
+    response_delivered: bool,
+) -> tuple[str, str]:
+    """Bind already-persisted raw evidence to the final attempt classification."""
+    manifest = {
+        "schema_version": ATTEMPT_SCHEMA_VERSION,
+        "turn_number": turn_number,
+        "attempt_number": attempt_number,
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        **raw_evidence,
+        "cli_return_code": returncode,
+        **parsed,
+        "response_delivered": bool(response_delivered),
+        "final_bridge_classification": classification,
+    }
+    manifest_bytes = json.dumps(manifest, indent=2, ensure_ascii=False, sort_keys=True).encode("utf-8") + b"\n"
+    return _write_hash_addressed_bytes(
+        os.path.join(attempt_dir, "attempt_metadata.json"), manifest_bytes
+    )
+
+
 # ---------------------------------------------------------------------------
 # Transport failure classification
 # ---------------------------------------------------------------------------
@@ -278,8 +376,11 @@ def _relay_claude_code_cli(
     system_prompt: str,
     remaining_wallclock: float,
     transcript: list,
+    attempt_dir: Optional[str] = None,
+    turn_number: int = 0,
+    attempt_number: int = 1,
 ) -> tuple:
-    """Invoke Claude Code in isolated print mode and verify the provider-reported model."""
+    """Invoke Claude Code, preserve raw attempt evidence, then classify the stream."""
     pinned_model = surface_config.get("pinned_model_id", "claude-sonnet-4-6")
     allowed_labels = set(surface_config.get("allowed_model_labels", [pinned_model]))
     effort = surface_config.get("inference_controls_pinned", {}).get("reasoning_effort", "high")
@@ -317,32 +418,80 @@ def _relay_claude_code_cli(
         "effort": effort,
         "timeout_seconds": round(timeout, 1),
     })
+    raw_evidence = None
+
+    def finish(
+        classification: str,
+        response_delivered: bool,
+        metadata: dict,
+        result_tuple: tuple,
+        *,
+        stdout_text: str,
+        stderr_text: str,
+        returncode: Optional[int],
+        parsed: dict,
+    ) -> tuple:
+        nonlocal raw_evidence
+        metadata = {
+            **metadata,
+            "response_delivered": bool(response_delivered),
+            "final_bridge_classification": classification,
+        }
+        if attempt_dir is not None:
+            if raw_evidence is None:
+                raw_evidence = _emit_attempt_raw(attempt_dir, stdout_text, stderr_text)
+            manifest_path, manifest_sha = _emit_attempt_manifest(
+                attempt_dir,
+                turn_number=turn_number,
+                attempt_number=attempt_number,
+                raw_evidence=raw_evidence,
+                returncode=returncode,
+                parsed=parsed,
+                classification=classification,
+                response_delivered=response_delivered,
+            )
+            transcript.append({
+                "event": "a1_bridge_attempt_evidence",
+                "turn_number": turn_number,
+                "attempt_number": attempt_number,
+                "manifest_path": manifest_path,
+                "manifest_sha256": manifest_sha,
+                "classification": classification,
+                "response_delivered": bool(response_delivered),
+            })
+        transcript.append({"event": "a1_bridge_transport_metadata", "metadata": metadata})
+        return result_tuple
+
     try:
         with tempfile.TemporaryDirectory(prefix="representation_lifting_a1_") as clean_cwd:
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=timeout, cwd=clean_cwd
             )
+        stdout_text = result.stdout or ""
+        stderr_text = result.stderr or ""
+        if attempt_dir is not None:
+            raw_evidence = _emit_attempt_raw(attempt_dir, stdout_text, stderr_text)
         if result.returncode != 0 and not result.stdout.strip():
             transcript.append({"event": "a1_bridge_cli_error",
                 "returncode": result.returncode, "stderr": result.stderr[:500]})
-            transcript.append({
-                "event": "a1_bridge_transport_metadata",
-                "metadata": {
-                    "model_returned": None,
-                    "assistant_model": None,
-                    "tools": [],
-                    "mcp_servers": [],
-                    "permission_mode": None,
-                    "stop_reason": "CLI_ERROR",
-                    "is_infra_failure": True,
-                },
-            })
-            return "", None, True
+            return finish(
+                "PRE_RESPONSE_TRANSPORT_FAILURE", False,
+                {"model_returned": None, "assistant_model": None, "tools": [],
+                 "mcp_servers": [], "permission_mode": None, "stop_reason": "CLI_ERROR",
+                 "is_infra_failure": True},
+                ("", None, True), stdout_text=stdout_text, stderr_text=stderr_text,
+                returncode=result.returncode,
+                parsed={"is_api_error_message": False, "result_is_error": None,
+                        "error_evidence": {"cli_nonzero_return": True}},
+            )
 
         init_event = None
         result_event = None
         assistant_stop_reason = None
         assistant_model = None
+        assistant_events = []
+        stream_error_events = []
+        non_json_seen = False
         for raw_line in result.stdout.splitlines():
             if not raw_line.strip():
                 continue
@@ -350,34 +499,156 @@ def _relay_claude_code_cli(
                 event = json.loads(raw_line)
             except json.JSONDecodeError:
                 transcript.append({"event": "a1_bridge_cli_non_json_output", "text": raw_line[:500]})
+                non_json_seen = True
                 continue
             if event.get("type") == "system" and event.get("subtype") == "init":
                 init_event = event
             elif event.get("type") == "assistant":
+                assistant_events.append(event)
                 msg = event.get("message", {}) or {}
                 assistant_stop_reason = msg.get("stop_reason") or assistant_stop_reason
                 assistant_model = msg.get("model") or assistant_model
             elif event.get("type") == "result":
                 result_event = event
+            elif event.get("type") == "error":
+                stream_error_events.append(event)
+
+        synthetic_seen = any(
+            (event.get("message", {}) or {}).get("model") == "<synthetic>"
+            for event in assistant_events
+        )
+        is_api_error_message = any(
+            event.get("isApiErrorMessage") is True
+            or (event.get("message", {}) or {}).get("isApiErrorMessage") is True
+            for event in assistant_events
+        )
+        assistant_error_marker = any(
+            event.get("error") not in (None, False, "")
+            or (event.get("message", {}) or {}).get("error") not in (None, False, "")
+            for event in assistant_events
+        ) or bool(stream_error_events)
+        result_is_error = result_event.get("is_error") if isinstance(result_event, dict) else None
+        result_error_marker = bool(
+            isinstance(result_event, dict)
+            and (result_event.get("is_error") is True
+                 or result_event.get("error") not in (None, False, ""))
+        )
+        ordinary_assistant_content_delivered = any(
+            (event.get("message", {}) or {}).get("model") != "<synthetic>"
+            and (event.get("message", {}) or {}).get("content") not in (None, "", [])
+            for event in assistant_events
+        )
+        delivered_assistant_text_parts = []
+        for event in assistant_events:
+            msg = event.get("message", {}) or {}
+            if msg.get("model") == "<synthetic>":
+                continue
+            content = msg.get("content")
+            if isinstance(content, str):
+                delivered_assistant_text_parts.append(content)
+            elif isinstance(content, list):
+                delivered_assistant_text_parts.extend(
+                    block.get("text", "") for block in content
+                    if isinstance(block, dict) and block.get("type") == "text"
+                )
+        delivered_assistant_text = "".join(delivered_assistant_text_parts)
+        successful_result_delivered = bool(
+            isinstance(result_event, dict)
+            and result_event.get("is_error") is not True
+            and "result" in result_event
+        )
+        delivered_response_text = (
+            result_event.get("result", "") if successful_result_delivered
+            else delivered_assistant_text
+        )
+        any_model_response_delivered = bool(
+            ordinary_assistant_content_delivered or successful_result_delivered
+        )
+        objective_error_evidence = bool(
+            is_api_error_message or assistant_error_marker or result_error_marker
+        )
+        parsed = {
+            "init_model": init_event.get("model") if isinstance(init_event, dict) else None,
+            "assistant_model": assistant_model,
+            "is_api_error_message": is_api_error_message,
+            "result_is_error": result_is_error,
+            "result_subtype": result_event.get("subtype") if isinstance(result_event, dict) else None,
+            "assistant_error_evidence": [
+                _safe_error_fields(event) for event in assistant_events
+                if _safe_error_fields(event)
+            ],
+            "stream_error_evidence": [
+                _safe_error_fields(event) for event in stream_error_events
+                if _safe_error_fields(event)
+            ],
+            "result_error_evidence": _safe_error_fields(result_event),
+            "non_json_output_seen": non_json_seen,
+            "synthetic_assistant_seen": synthetic_seen,
+            "actual_model_response_content_delivered": ordinary_assistant_content_delivered,
+        }
+
+        returned_model = init_event.get("model") if isinstance(init_event, dict) else None
+        tools = init_event.get("tools", []) if isinstance(init_event, dict) else []
+        mcp_servers = init_event.get("mcp_servers", []) if isinstance(init_event, dict) else []
+        permission_mode = init_event.get("permissionMode") if isinstance(init_event, dict) else None
+        base_metadata = {
+            "model_returned": returned_model,
+            "assistant_model": assistant_model,
+            "tools": tools,
+            "mcp_servers": mcp_servers,
+            "permission_mode": permission_mode,
+        }
+
+        # Error semantics are resolved before ordinary assistant-model identity checks.
+        if objective_error_evidence and not any_model_response_delivered:
+            transcript.append({
+                "event": "a1_bridge_pre_response_error_envelope",
+                "synthetic_assistant_seen": synthetic_seen,
+                "is_api_error_message": is_api_error_message,
+                "result_is_error": result_is_error,
+            })
+            return finish(
+                "PRE_RESPONSE_TRANSPORT_FAILURE", False,
+                {**base_metadata, "stop_reason": "PRE_RESPONSE_TRANSPORT_FAILURE",
+                 "is_infra_failure": True},
+                ("", None, True), stdout_text=stdout_text, stderr_text=stderr_text,
+                returncode=result.returncode, parsed=parsed,
+            )
+
+        if objective_error_evidence and any_model_response_delivered:
+            transcript.append({
+                "event": "a1_bridge_error_after_response_delivery",
+                "is_api_error_message": is_api_error_message,
+                "result_is_error": result_is_error,
+            })
+            return finish(
+                "DELIVERED_RESPONSE_PROTOCOL_FAILURE", True,
+                {**base_metadata, "stop_reason": "SURFACE_PROTOCOL_FAIL",
+                 "is_infra_failure": True},
+                (delivered_response_text, "SURFACE_PROTOCOL_FAIL", True),
+                stdout_text=stdout_text, stderr_text=stderr_text,
+                returncode=result.returncode, parsed=parsed,
+            )
+
+        if synthetic_seen and not objective_error_evidence:
+            transcript.append({"event": "a1_bridge_unproven_synthetic_assistant"})
+            return finish(
+                "SYNTHETIC_WITHOUT_ERROR_EVIDENCE", False,
+                {**base_metadata, "stop_reason": "SYNTHETIC_WITHOUT_ERROR_EVIDENCE",
+                 "is_infra_failure": True},
+                ("", "SYNTHETIC_WITHOUT_ERROR_EVIDENCE", True),
+                stdout_text=stdout_text, stderr_text=stderr_text,
+                returncode=result.returncode, parsed=parsed,
+            )
 
         if init_event is None:
             transcript.append({"event": "a1_bridge_cli_missing_init_event"})
-            transcript.append({
-                "event": "a1_bridge_transport_metadata",
-                "metadata": {
-                    "model_returned": None,
-                    "assistant_model": None,
-                    "tools": [],
-                    "mcp_servers": [],
-                    "permission_mode": None,
-                    "stop_reason": "SURFACE_PROTOCOL_FAIL",
-                    "is_infra_failure": True,
-                },
-            })
-            return "", "SURFACE_PROTOCOL_FAIL", True
-        returned_model = init_event.get("model")
-        tools = init_event.get("tools", [])
-        mcp_servers = init_event.get("mcp_servers", [])
+            return finish(
+                "SURFACE_PROTOCOL_FAIL", False,
+                {**base_metadata, "stop_reason": "SURFACE_PROTOCOL_FAIL", "is_infra_failure": True},
+                ("", "SURFACE_PROTOCOL_FAIL", True), stdout_text=stdout_text,
+                stderr_text=stderr_text, returncode=result.returncode, parsed=parsed,
+            )
         transcript.append({
             "event": "a1_bridge_cli_init",
             "model_returned": returned_model,
@@ -392,83 +663,48 @@ def _relay_claude_code_cli(
                 "expected_allowed": sorted(allowed_labels),
                 "returned": returned_model,
             })
-            transcript.append({
-                "event": "a1_bridge_transport_metadata",
-                "metadata": {
-                    "model_returned": returned_model,
-                    "assistant_model": assistant_model,
-                    "tools": tools,
-                    "mcp_servers": mcp_servers,
-                    "permission_mode": init_event.get("permissionMode"),
-                    "stop_reason": "MODEL_IDENTITY_FAIL",
-                    "is_infra_failure": True,
-                },
-            })
-            return "", "MODEL_IDENTITY_FAIL", True
+            return finish(
+                "MODEL_IDENTITY_FAIL", any_model_response_delivered,
+                {**base_metadata, "stop_reason": "MODEL_IDENTITY_FAIL", "is_infra_failure": True},
+                (delivered_response_text, "MODEL_IDENTITY_FAIL", True), stdout_text=stdout_text,
+                stderr_text=stderr_text, returncode=result.returncode, parsed=parsed,
+            )
         if assistant_model is not None and assistant_model not in allowed_labels:
             transcript.append({
                 "event": "a1_bridge_assistant_model_id_mismatch",
                 "expected_allowed": sorted(allowed_labels),
                 "returned": assistant_model,
             })
-            transcript.append({
-                "event": "a1_bridge_transport_metadata",
-                "metadata": {
-                    "model_returned": returned_model,
-                    "assistant_model": assistant_model,
-                    "tools": tools,
-                    "mcp_servers": mcp_servers,
-                    "permission_mode": init_event.get("permissionMode"),
-                    "stop_reason": "MODEL_IDENTITY_FAIL",
-                    "is_infra_failure": True,
-                },
-            })
-            return "", "MODEL_IDENTITY_FAIL", True
+            return finish(
+                "MODEL_IDENTITY_FAIL", any_model_response_delivered,
+                {**base_metadata, "stop_reason": "MODEL_IDENTITY_FAIL", "is_infra_failure": True},
+                (delivered_response_text, "MODEL_IDENTITY_FAIL", True), stdout_text=stdout_text,
+                stderr_text=stderr_text, returncode=result.returncode, parsed=parsed,
+            )
         if tools:
             transcript.append({"event": "a1_bridge_unexpected_tools_exposed", "tools": tools})
-            transcript.append({
-                "event": "a1_bridge_transport_metadata",
-                "metadata": {
-                    "model_returned": returned_model,
-                    "assistant_model": assistant_model,
-                    "tools": tools,
-                    "mcp_servers": mcp_servers,
-                    "permission_mode": init_event.get("permissionMode"),
-                    "stop_reason": "UNAUTHORIZED_TOOL_EXPOSURE",
-                    "is_infra_failure": True,
-                },
-            })
-            return "", "UNAUTHORIZED_TOOL_EXPOSURE", True
+            return finish(
+                "UNAUTHORIZED_TOOL_EXPOSURE", any_model_response_delivered,
+                {**base_metadata, "stop_reason": "UNAUTHORIZED_TOOL_EXPOSURE", "is_infra_failure": True},
+                (delivered_response_text, "UNAUTHORIZED_TOOL_EXPOSURE", True), stdout_text=stdout_text,
+                stderr_text=stderr_text, returncode=result.returncode, parsed=parsed,
+            )
         if any(s.get("status") not in (None, "disabled") for s in mcp_servers):
             transcript.append({"event": "a1_bridge_unexpected_mcp_exposure", "mcp_servers": mcp_servers})
-            transcript.append({
-                "event": "a1_bridge_transport_metadata",
-                "metadata": {
-                    "model_returned": returned_model,
-                    "assistant_model": assistant_model,
-                    "tools": tools,
-                    "mcp_servers": mcp_servers,
-                    "permission_mode": init_event.get("permissionMode"),
-                    "stop_reason": "UNAUTHORIZED_TOOL_EXPOSURE",
-                    "is_infra_failure": True,
-                },
-            })
-            return "", "UNAUTHORIZED_TOOL_EXPOSURE", True
+            return finish(
+                "UNAUTHORIZED_TOOL_EXPOSURE", any_model_response_delivered,
+                {**base_metadata, "stop_reason": "UNAUTHORIZED_TOOL_EXPOSURE", "is_infra_failure": True},
+                (delivered_response_text, "UNAUTHORIZED_TOOL_EXPOSURE", True), stdout_text=stdout_text,
+                stderr_text=stderr_text, returncode=result.returncode, parsed=parsed,
+            )
         if result_event is None or result_event.get("is_error"):
             transcript.append({"event": "a1_bridge_cli_missing_or_error_result", "result": result_event})
-            transcript.append({
-                "event": "a1_bridge_transport_metadata",
-                "metadata": {
-                    "model_returned": returned_model,
-                    "assistant_model": assistant_model,
-                    "tools": tools,
-                    "mcp_servers": mcp_servers,
-                    "permission_mode": init_event.get("permissionMode"),
-                    "stop_reason": "SURFACE_PROTOCOL_FAIL",
-                    "is_infra_failure": True,
-                },
-            })
-            return "", "SURFACE_PROTOCOL_FAIL", True
+            return finish(
+                "SURFACE_PROTOCOL_FAIL", any_model_response_delivered,
+                {**base_metadata, "stop_reason": "SURFACE_PROTOCOL_FAIL", "is_infra_failure": True},
+                (delivered_response_text, "SURFACE_PROTOCOL_FAIL", True), stdout_text=stdout_text,
+                stderr_text=stderr_text, returncode=result.returncode, parsed=parsed,
+            )
 
         response_text = result_event.get("result", "")
         stop_reason = assistant_stop_reason or "end_turn"
@@ -480,49 +716,39 @@ def _relay_claude_code_cli(
             "assistant_model": assistant_model,
             "stop_reason": stop_reason,
         })
-        transcript.append({
-            "event": "a1_bridge_transport_metadata",
-            "metadata": {
-                "model_returned": returned_model,
-                "assistant_model": assistant_model,
-                "tools": tools,
-                "mcp_servers": mcp_servers,
-                "permission_mode": init_event.get("permissionMode"),
-                "stop_reason": stop_reason,
-                "is_infra_failure": False,
-            },
-        })
-        return response_text, stop_reason, False
-    except subprocess.TimeoutExpired:
+        return finish(
+            "DELIVERED_RESPONSE", True,
+            {**base_metadata, "stop_reason": stop_reason, "is_infra_failure": False},
+            (response_text, stop_reason, False), stdout_text=stdout_text,
+            stderr_text=stderr_text, returncode=result.returncode, parsed=parsed,
+        )
+    except subprocess.TimeoutExpired as exc:
         transcript.append({"event": "a1_bridge_cli_timeout"})
-        transcript.append({
-            "event": "a1_bridge_transport_metadata",
-            "metadata": {
-                "model_returned": None,
-                "assistant_model": None,
-                "tools": [],
-                "mcp_servers": [],
-                "permission_mode": None,
-                "stop_reason": "TIMEOUT",
-                "is_infra_failure": True,
-            },
-        })
-        return "", None, True
+        stdout_text = exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+        stderr_text = exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+        if attempt_dir is not None:
+            raw_evidence = _emit_attempt_raw(attempt_dir, stdout_text, stderr_text)
+        return finish(
+            "PRE_RESPONSE_TRANSPORT_FAILURE", False,
+            {"model_returned": None, "assistant_model": None, "tools": [], "mcp_servers": [],
+             "permission_mode": None, "stop_reason": "TIMEOUT", "is_infra_failure": True},
+            ("", None, True), stdout_text=stdout_text, stderr_text=stderr_text,
+            returncode=None,
+            parsed={"is_api_error_message": False, "result_is_error": None,
+                    "error_evidence": {"exception_type": "TimeoutExpired"}},
+        )
     except (FileNotFoundError, OSError) as exc:
         transcript.append({"event": "a1_bridge_cli_not_found", "error": str(exc)})
-        transcript.append({
-            "event": "a1_bridge_transport_metadata",
-            "metadata": {
-                "model_returned": None,
-                "assistant_model": None,
-                "tools": [],
-                "mcp_servers": [],
-                "permission_mode": None,
-                "stop_reason": "CLI_NOT_FOUND",
-                "is_infra_failure": True,
-            },
-        })
-        return "", None, True
+        if attempt_dir is not None:
+            raw_evidence = _emit_attempt_raw(attempt_dir, "", str(exc))
+        return finish(
+            "PRE_RESPONSE_TRANSPORT_FAILURE", False,
+            {"model_returned": None, "assistant_model": None, "tools": [], "mcp_servers": [],
+             "permission_mode": None, "stop_reason": "CLI_NOT_FOUND", "is_infra_failure": True},
+            ("", None, True), stdout_text="", stderr_text=str(exc), returncode=None,
+            parsed={"is_api_error_message": False, "result_is_error": None,
+                    "error_evidence": {"exception_type": type(exc).__name__}},
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -684,8 +910,10 @@ def a1_call_surface(
     backoffs = list(policy.get("backoff_seconds", []))
     call_start = time.monotonic()
     response_text, stop_reason, infra_fail = "", None, True
+    attempts_used = 0
 
     for attempt in range(1, max_attempts + 1):
+        attempts_used = attempt
         elapsed = time.monotonic() - call_start
         effective_remaining = remaining_wallclock - elapsed
         if effective_remaining <= 1.0:
@@ -705,8 +933,12 @@ def a1_call_surface(
 
         transcript.append({"event": "a1_bridge_transport_attempt", "attempt": attempt})
         if surface_type == "claude-code-cli":
+            attempt_dir = os.path.join(
+                artifact_dir, "transport_attempts", f"turn_{turn_number}", f"attempt_{attempt}"
+            )
             response_text, stop_reason, infra_fail = _relay_claude_code_cli(
-                si_path, surface_config, system_prompt, effective_remaining, transcript
+                si_path, surface_config, system_prompt, effective_remaining, transcript,
+                attempt_dir=attempt_dir, turn_number=turn_number, attempt_number=attempt,
             )
         elif surface_type == "chatgpt-web":
             resp_collect_path = os.path.join(
@@ -750,6 +982,26 @@ def a1_call_surface(
             "is_infra_failure": bool(infra_fail),
         }
 
+    attempt_refs = []
+    for ev in transcript:
+        if (ev.get("event") == "a1_bridge_attempt_evidence"
+                and ev.get("turn_number") == turn_number):
+            attempt_refs.append({
+                "attempt_number": ev.get("attempt_number"),
+                "manifest_path": ev.get("manifest_path"),
+                "manifest_sha256": ev.get("manifest_sha256"),
+                "classification": ev.get("classification"),
+                "response_delivered": ev.get("response_delivered"),
+            })
+    meta_dict["transport_attempts"] = sorted(
+        attempt_refs, key=lambda item: item.get("attempt_number") or 0
+    )
+    meta_dict["attempts_used"] = attempts_used
+    meta_dict["frozen_max_attempts"] = max_attempts
+    meta_dict["retry_exhausted"] = bool(
+        infra_fail and stop_reason is None and attempts_used >= max_attempts
+    )
+
     meta_path, meta_sha = emit_transport_metadata(artifact_dir, turn_number, meta_dict)
     transcript.append({
         "event": "a1_bridge_transport_metadata_emitted",
@@ -758,6 +1010,14 @@ def a1_call_surface(
     })
 
     if infra_fail:
+        if meta_dict.get("response_delivered") is True:
+            resp_path, resp_sha = emit_response(artifact_dir, turn_number, response_text)
+            transcript.append({
+                "event": "a1_bridge_invalid_response_preserved",
+                "path": resp_path,
+                "sha256": resp_sha,
+                "response_length": len(response_text),
+            })
         transcript.append({"event": "a1_bridge_infra_failure", "attempts": max_attempts})
         return "", stop_reason, True
 
@@ -767,6 +1027,121 @@ def a1_call_surface(
         "path": resp_path, "sha256": resp_sha, "response_length": len(response_text)})
 
     return response_text, stop_reason, False
+
+
+def _validate_embedded_json_hash(path: str) -> tuple[bool, Optional[dict]]:
+    """Validate the bridge JSON envelope convention without returning payload content."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        embedded = data.pop("sha256", None)
+        actual = _sha256_bytes(
+            json.dumps(data, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        )
+        with open(path + ".sha256", "r", encoding="utf-8") as f:
+            sidecar = f.read().strip().split()[0]
+        return embedded == actual == sidecar, data
+    except (OSError, ValueError, IndexError, json.JSONDecodeError):
+        return False, None
+
+
+def _validate_raw_hash(path: str, expected: Optional[str] = None) -> bool:
+    try:
+        actual = _sha256_file(path)
+        with open(path + ".sha256", "r", encoding="utf-8") as f:
+            sidecar = f.read().strip().split()[0]
+        return actual == sidecar and (expected is None or actual == expected)
+    except (OSError, IndexError):
+        return False
+
+
+def validate_turn_transport_custody(
+    branch_artifact_dir: str, turn_number: int
+) -> dict:
+    """Validate r9 turn evidence without interpreting scientific response content."""
+    failures = []
+    req = os.path.join(branch_artifact_dir, "requests", f"request_{turn_number}.json")
+    surface = os.path.join(branch_artifact_dir, "requests", f"surface_input_{turn_number}.txt")
+    meta = os.path.join(
+        branch_artifact_dir, "transport_metadata", f"transport_metadata_{turn_number}.json"
+    )
+    response = os.path.join(branch_artifact_dir, "responses", f"response_{turn_number}.txt")
+
+    request_ok, _ = _validate_embedded_json_hash(req)
+    metadata_ok, metadata = _validate_embedded_json_hash(meta)
+    if not request_ok:
+        failures.append("REQUEST_HASH_INVALID_OR_MISSING")
+    if not _validate_raw_hash(surface):
+        failures.append("SURFACE_INPUT_HASH_INVALID_OR_MISSING")
+    if not metadata_ok or metadata is None:
+        failures.append("TRANSPORT_METADATA_HASH_INVALID_OR_MISSING")
+        return {"custody_pass": False, "failure_reasons": failures}
+
+    refs = metadata.get("transport_attempts")
+    if not isinstance(refs, list) or not refs:
+        failures.append("ATTEMPT_EVIDENCE_MISSING")
+        refs = []
+    attempt_numbers = [ref.get("attempt_number") for ref in refs if isinstance(ref, dict)]
+    if attempt_numbers != list(range(1, len(refs) + 1)):
+        failures.append("ATTEMPT_SEQUENCE_INVALID")
+
+    branch_root = os.path.realpath(branch_artifact_dir)
+    manifests = []
+    for ref in refs:
+        if not isinstance(ref, dict):
+            failures.append("ATTEMPT_REFERENCE_INVALID")
+            continue
+        manifest_path = ref.get("manifest_path")
+        if not isinstance(manifest_path, str):
+            failures.append("ATTEMPT_MANIFEST_PATH_MISSING")
+            continue
+        real_manifest = os.path.realpath(manifest_path)
+        if os.path.commonpath([branch_root, real_manifest]) != branch_root:
+            failures.append("ATTEMPT_MANIFEST_OUTSIDE_BRANCH")
+            continue
+        if not _validate_raw_hash(real_manifest, ref.get("manifest_sha256")):
+            failures.append("ATTEMPT_MANIFEST_HASH_INVALID")
+            continue
+        try:
+            with open(real_manifest, "r", encoding="utf-8") as f:
+                manifest = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            failures.append("ATTEMPT_MANIFEST_INVALID")
+            continue
+        manifests.append(manifest)
+        if manifest.get("schema_version") != ATTEMPT_SCHEMA_VERSION:
+            failures.append("ATTEMPT_SCHEMA_INVALID")
+        if manifest.get("attempt_number") != ref.get("attempt_number"):
+            failures.append("ATTEMPT_NUMBER_BINDING_MISMATCH")
+        for stream_key in ("raw_stdout", "raw_stderr"):
+            stream_ref = manifest.get(stream_key)
+            if not isinstance(stream_ref, dict):
+                failures.append(f"{stream_key.upper()}_REFERENCE_MISSING")
+                continue
+            stream_path = os.path.join(os.path.dirname(real_manifest), stream_ref.get("path", ""))
+            if not _validate_raw_hash(stream_path, stream_ref.get("sha256")):
+                failures.append(f"{stream_key.upper()}_HASH_INVALID")
+
+    delivered = metadata.get("response_delivered") is True
+    final_classification = metadata.get("final_bridge_classification")
+    response_exists = os.path.isfile(response) or os.path.isfile(response + ".sha256")
+    if delivered:
+        if not _validate_raw_hash(response):
+            failures.append("DELIVERED_RESPONSE_ARTIFACT_REQUIRED")
+    else:
+        final_attempt = manifests[-1] if manifests else {}
+        proven_pre_response = bool(
+            final_classification == "PRE_RESPONSE_TRANSPORT_FAILURE"
+            and final_attempt.get("final_bridge_classification") == "PRE_RESPONSE_TRANSPORT_FAILURE"
+            and final_attempt.get("response_delivered") is False
+            and metadata.get("is_infra_failure") is True
+        )
+        if not proven_pre_response:
+            failures.append("MISSING_RESPONSE_WITHOUT_PROVEN_PRE_RESPONSE_FAILURE")
+        if response_exists:
+            failures.append("RESPONSE_ARTIFACT_PRESENT_FOR_PRE_RESPONSE_FAILURE")
+
+    return {"custody_pass": not failures, "failure_reasons": failures}
 
 
 # ---------------------------------------------------------------------------
