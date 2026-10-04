@@ -504,7 +504,8 @@ class TestA1SurfaceBridge(unittest.TestCase):
             {"role": "user", "content": "U2"},
         ]
         path, _, _ = bridge.emit_surface_input(self.tmp, 4, "SYS", msgs, sc)
-        content = open(path, encoding="utf-8").read()
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
         self.assertIn("U1", content)
         self.assertIn("A1", content)
         self.assertIn("U2", content)
@@ -618,14 +619,14 @@ class TestA1SurfaceBridge(unittest.TestCase):
         )
 
     # ------------------------------------------------------------------
-    # 16. Gate 5 exact-match check
+    # 16. Gate 5 probe and preflight verification (§A1.11 / Finding F2)
     # ------------------------------------------------------------------
     def test_gate5_exact_match_pass(self):
-        """Gate 5 probe passes on exact JSON response."""
+        """Gate 5 probe passes on exact JSON response (testing response parser)."""
         cfg = _make_native_surface_config(self.tmp)
         with patch.object(bridge, "_relay_claude_code_cli",
                           return_value=(bridge.GATE5_EXPECTED_RESPONSE, "end_turn", False)):
-            result = bridge.run_gate5_probe("claude-sonnet-4-6", cfg, self.tmp)
+            result = bridge.run_gate5_probe("claude-sonnet-4-6", cfg, self.tmp, skip_preflight=True)
         self.assertTrue(result["gate5_pass"])
         self.assertTrue(result["exact_match"])
 
@@ -635,7 +636,7 @@ class TestA1SurfaceBridge(unittest.TestCase):
         bad_resp = bridge.GATE5_EXPECTED_RESPONSE + "\n\nSure, here you go!"
         with patch.object(bridge, "_relay_claude_code_cli",
                           return_value=(bad_resp, "end_turn", False)):
-            result = bridge.run_gate5_probe("claude-sonnet-4-6", cfg, self.tmp)
+            result = bridge.run_gate5_probe("claude-sonnet-4-6", cfg, self.tmp, skip_preflight=True)
         self.assertFalse(result["gate5_pass"])
         self.assertEqual(result["failure_reason"], "RESPONSE_NOT_EXACT_MATCH")
 
@@ -644,9 +645,213 @@ class TestA1SurfaceBridge(unittest.TestCase):
         cfg = _make_native_surface_config(self.tmp)
         with patch.object(bridge, "_relay_claude_code_cli",
                           return_value=("", None, True)):
-            result = bridge.run_gate5_probe("claude-sonnet-4-6", cfg, self.tmp)
+            result = bridge.run_gate5_probe("claude-sonnet-4-6", cfg, self.tmp, skip_preflight=True)
         self.assertFalse(result["gate5_pass"])
         self.assertEqual(result["failure_reason"], "INFRA_FAILURE")
+
+    def test_gate5_preflight_verifies_all_config_bindings(self):
+        """Gate 5 preflight verifies actual repository hashes against candidate config."""
+        real_cfg_path = os.path.join(REPO_ROOT, "evidence", "amendment_a1", "a1_transport_config.json")
+        with open(real_cfg_path, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+
+        res = bridge.verify_gate5_preflight(cfg, root_dir=REPO_ROOT)
+        self.assertTrue(res["preflight_pass"], f"Preflight failed: {res.get('failure_reason')}")
+        self.assertIsNone(res["failure_reason"])
+        self.assertIn("frozen_executor_harness_sha256", res["verified_bindings"])
+        self.assertEqual(res["verified_bindings"]["frozen_executor_harness_sha256"]["status"], "MATCH")
+
+    def test_gate5_preflight_fails_closed_on_tampered_hash(self):
+        """Gate 5 preflight fails closed if any configuration hash is tampered."""
+        cfg = {
+            "frozen_executor_config_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "frozen_executor_harness_sha256": FROZEN_HARNESS_SHA,
+            "bridge_sha256": "tampered",
+            "bridge_tests_sha256": "tampered",
+            "bridge_activate_sha256": "tampered",
+            "target_preparer_sha256": "tampered",
+            "target_preparer_tests_sha256": "tampered",
+            "amendment_text_sha256": "tampered",
+            "surfaces": {"primary": {"executable_path": "/bin/echo", "surface_binary_sha256": "tampered"}},
+        }
+        res = bridge.verify_gate5_preflight(cfg, root_dir=REPO_ROOT)
+        self.assertFalse(res["preflight_pass"])
+        self.assertIn("frozen_executor_config_sha256", res["failure_reason"])
+
+    def test_gate5_preflight_fails_closed_on_missing_file(self):
+        """Gate 5 preflight fails closed if a required asset file is missing."""
+        cfg = {
+            "frozen_executor_config_sha256": FROZEN_CONFIG_SHA,
+            "frozen_executor_harness_sha256": FROZEN_HARNESS_SHA,
+            "bridge_sha256": "any",
+            "bridge_tests_sha256": "any",
+            "bridge_activate_sha256": "any",
+            "target_preparer_sha256": "any",
+            "target_preparer_tests_sha256": "any",
+            "amendment_text_sha256": "any",
+            "surfaces": {"primary": {"executable_path": "/nonexistent/binary", "surface_binary_sha256": "any"}},
+        }
+        with tempfile.TemporaryDirectory() as empty_dir:
+            res = bridge.verify_gate5_preflight(cfg, root_dir=empty_dir)
+            self.assertFalse(res["preflight_pass"])
+            self.assertIn("FILE_NOT_FOUND", str(res["verified_bindings"]))
+
+    def test_gate5_probe_enforces_preflight_by_default(self):
+        """Gate 5 probe fails closed without sending inference if preflight fails."""
+        cfg = {
+            "frozen_executor_config_sha256": "corrupted",
+            "frozen_executor_harness_sha256": FROZEN_HARNESS_SHA,
+            "bridge_sha256": "corrupted",
+            "bridge_tests_sha256": "corrupted",
+            "bridge_activate_sha256": "corrupted",
+            "target_preparer_sha256": "corrupted",
+            "target_preparer_tests_sha256": "corrupted",
+            "amendment_text_sha256": "corrupted",
+            "surfaces": {"primary": {"executable_path": "/nonexistent", "surface_binary_sha256": "corrupted"}},
+        }
+        with patch.object(bridge, "a1_call_surface") as mock_call_surface:
+            res = bridge.run_gate5_probe("claude-sonnet-4-6", cfg, self.tmp, root_dir=REPO_ROOT)
+            self.assertFalse(res["gate5_pass"])
+            self.assertIn("PREFLIGHT_CONFIG_BINDING_MISMATCH", res["failure_reason"])
+            # Proves fail-closed: zero inference calls made
+            mock_call_surface.assert_not_called()
+
+    # ------------------------------------------------------------------
+    # 17. Evidence preservation and sealing (§A1.17 / Finding F1)
+    # ------------------------------------------------------------------
+    def test_a1_evidence_preservation_and_sealing_contract(self):
+        """
+        §A1.17 / Finding F1:
+        Verifies that running a blind case under A1 emits a joint receipt containing
+        all 12 required A1 fields and creates sealed archives for each completed branch.
+        """
+        import tools.a1_activate as a1_act
+        import tools.executor_harness as eh
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            art_dir = os.path.join(tmp_dir, "artifacts")
+            sealed_dir = os.path.join(tmp_dir, "sealed_transcripts")
+            receipt_dir = os.path.join(tmp_dir, "receipts")
+            a1_act.configure(artifact_dir=art_dir, sealed_dir=sealed_dir, receipt_dir=receipt_dir)
+            a1_act.reset_branch_seals()
+
+            dummy_target = os.path.join(tmp_dir, "proofnet-999.lean")
+            with open(dummy_target, "w", encoding="utf-8") as f:
+                f.write("theorem frozen_target : True := trivial\n")
+
+            def mock_agent(role, turn, msgs):
+                if role == "D":
+                    return ("```lean\ntheorem executor_theorem : True := trivial\n```", "end_turn", False)
+                elif role == "S":
+                    return ("```lean\ndef stub : True := trivial\n```", "end_turn", False)
+                elif role == "L":
+                    return ("```lean\ntheorem lifted_theorem : True := trivial\n```", "end_turn", False)
+                return ("", "end_turn", True)
+
+            def fake_verifier(cmd, *args, **kwargs):
+                cmd_str = " ".join(cmd)
+                if "count_lean_tokens.py" in cmd_str or "count_tokens" in cmd_str:
+                    return MagicMock(returncode=0, stdout="42\n", stderr="")
+                elif "check_bridge.py" in cmd_str:
+                    return MagicMock(returncode=0, stdout="CHECK_BRIDGE_SENTINEL_OK\nBRIDGE_VALID", stderr="")
+                elif "verify_proof.sh" in cmd_str:
+                    return MagicMock(returncode=0, stdout="VERIFICATION_SUCCESS", stderr="")
+                elif "verify_lifted.sh" in cmd_str:
+                    return MagicMock(returncode=0, stdout="VERIFY_LIFTED_SENTINEL_OK", stderr="")
+                return MagicMock(returncode=0, stdout="", stderr="")
+
+            with patch.object(eh.subprocess, "run", side_effect=fake_verifier):
+                report = eh.run_blind_case("proofnet-999", dummy_target, "claude-sonnet-4-6", mock_generator=mock_agent)
+
+            # Check all 12 A1.17 required fields
+            self.assertEqual(report.get("transport_amendment"), "A1")
+            self.assertIn("transport_surface", report)
+            self.assertIn("model_identity_evidence", report)
+            self.assertEqual(report.get("model_label_displayed"), "claude-sonnet-4-6")
+            self.assertIn("model_label_in_allowed_set", report)
+            self.assertIn("a1_transport_config_sha256", report)
+            self.assertIn("bridge_sha256", report)
+            self.assertIn("bridge_activate_sha256", report)
+            self.assertIn("inference_controls", report)
+            self.assertIn("system_role_handling", report)
+            self.assertIn("message_history_handling", report)
+            self.assertIn("transcript_sealed_sha256", report)
+            self.assertIn("branch_sealed_transcripts", report)
+
+            # Verify sealed archives exist and have valid sha256
+            branch_seals = report["branch_sealed_transcripts"]
+            for r in ["D", "S", "L"]:
+                seal_info = branch_seals.get(r)
+                self.assertIsNotNone(seal_info, f"Missing seal info for role {r}")
+                arch_path = seal_info["archive_path"]
+                self.assertTrue(os.path.isfile(arch_path), f"Sealed archive not found: {arch_path}")
+                self.assertTrue(os.path.isfile(arch_path + ".sha256"))
+                self.assertEqual(seal_info["sha256"], _sha256_file(arch_path))
+
+    # ------------------------------------------------------------------
+    # 18. Cross-case overwrite protection (§A1.17 / Finding F3)
+    # ------------------------------------------------------------------
+    def test_three_consecutive_blind_cases_no_evidence_overwrite(self):
+        """
+        Finding F3:
+        Verifies that three consecutive blind cases (proofnet-108, proofnet-083, proofnet-267)
+        do NOT overwrite each other's turn artifacts, sealed transcripts, or receipts.
+        """
+        import tools.a1_activate as a1_act
+        import tools.executor_harness as eh
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            art_dir = os.path.join(tmp_dir, "artifacts")
+            sealed_dir = os.path.join(tmp_dir, "sealed_transcripts")
+            receipt_dir = os.path.join(tmp_dir, "receipts")
+            a1_act.configure(artifact_dir=art_dir, sealed_dir=sealed_dir, receipt_dir=receipt_dir)
+            a1_act.reset_branch_seals()
+
+            cases = ["proofnet-108", "proofnet-083", "proofnet-267"]
+            reports = {}
+
+            def mock_agent(role, turn, msgs):
+                return (f"```lean\n-- {role} turn {turn}\ntheorem thm : True := trivial\n```", "end_turn", False)
+
+            def fake_verifier(cmd, *args, **kwargs):
+                cmd_str = " ".join(cmd)
+                if "count_lean_tokens.py" in cmd_str or "count_tokens" in cmd_str:
+                    return MagicMock(returncode=0, stdout="42\n", stderr="")
+                elif "check_bridge.py" in cmd_str:
+                    return MagicMock(returncode=0, stdout="CHECK_BRIDGE_SENTINEL_OK\nBRIDGE_VALID", stderr="")
+                elif "verify_proof.sh" in cmd_str:
+                    return MagicMock(returncode=0, stdout="VERIFICATION_SUCCESS", stderr="")
+                elif "verify_lifted.sh" in cmd_str:
+                    return MagicMock(returncode=0, stdout="VERIFY_LIFTED_SENTINEL_OK", stderr="")
+                return MagicMock(returncode=0, stdout="", stderr="")
+
+            with patch.object(eh.subprocess, "run", side_effect=fake_verifier):
+                for cid in cases:
+                    tpath = os.path.join(tmp_dir, f"{cid}.lean")
+                    with open(tpath, "w", encoding="utf-8") as f:
+                        f.write("theorem frozen_target : True := trivial\n")
+
+                    a1_act.reset_turn_counter()
+                    rep = eh.run_blind_case(cid, tpath, "claude-sonnet-4-6", mock_generator=mock_agent)
+                    reports[cid] = rep
+
+            # Verify each case has its own isolated directories and archives
+            for cid in cases:
+                for r in ["D", "S", "L"]:
+                    branch_dir = os.path.join(art_dir, cid, r)
+                    self.assertTrue(os.path.isdir(branch_dir), f"Branch dir missing: {branch_dir}")
+                    seal_path = os.path.join(sealed_dir, f"sealed_{cid}_{r}_claude-sonnet-4-6.tar")
+                    self.assertTrue(os.path.isfile(seal_path), f"Sealed tar missing: {seal_path}")
+                    self.assertEqual(reports[cid]["transcript_sealed_sha256"][r], _sha256_file(seal_path))
+
+            # Verify receipts in receipt_dir are distinct and correctly populated
+            for cid in cases:
+                rcpt = os.path.join(receipt_dir, f"execution_receipt_blind_{cid}_claude-sonnet-4-6.json")
+                self.assertTrue(os.path.isfile(rcpt), f"Receipt missing: {rcpt}")
+                with open(rcpt, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                self.assertEqual(data["case_id"], cid)
+                self.assertEqual(data["transport_amendment"], "A1")
 
 
 if __name__ == "__main__":

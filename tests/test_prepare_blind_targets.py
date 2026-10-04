@@ -124,5 +124,17 @@ class TestPrepareBlindTargets(unittest.TestCase):
             res = subprocess.run(["lake", "env", "lean", fpath], cwd=PROJECT_ROOT, capture_output=True, text=True)
             self.assertEqual(res.returncode, 0, f"Lean elaboration failed for {cid}:\n{res.stderr}")
 
+    def test_source_jsonl_sha_fail_closed(self):
+        """
+        Verifies that prepare_targets fails closed if source JSONL SHA-256 does not match canonical pin.
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            corrupt_jsonl = os.path.join(tmp_dir, "corrupt.jsonl")
+            with open(corrupt_jsonl, "w", encoding="utf-8") as f:
+                f.write('{"index": 1, "name": "dummy"}\n')
+            with self.assertRaises(ValueError) as ctx:
+                prepare_targets(corrupt_jsonl, tmp_dir)
+            self.assertIn("Source ProofNet JSONL SHA-256 mismatch", str(ctx.exception))
+
 if __name__ == "__main__":
     unittest.main()

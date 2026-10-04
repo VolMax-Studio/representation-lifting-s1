@@ -3,6 +3,7 @@
 tools/prepare_blind_targets.py
 Deterministic extractor for Gate 4 selected ProofNet cases into frozen_target format.
 Transforms canonical ProofNet statement into Lake-compatible target module:
+- Asserts canonical ProofNet JSONL SHA-256 before extraction (fail-closed).
 - Preserves hoisted imports, opens, and helper definitions.
 - Renames main theorem declaration to `theorem frozen_target`.
 - Appends `:= by sorry` for baseline elaboration.
@@ -12,13 +13,14 @@ import os
 import sys
 import re
 import json
+import hashlib
 import argparse
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 sys.path.insert(0, SCRIPT_DIR)
 
-from extract_proofnet_statement import extract_canonical_statement
+from extract_proofnet_statement import extract_canonical_statement, PROOFNET_CANONICAL_JSONL_SHA256
 
 DEFAULT_JSONL = "/home/volmax-studio/volmax-projects/iot2/ARCHIVE_EXTERNAL/ProofNet-Verified/data/proofnet-verified.jsonl"
 
@@ -28,9 +30,25 @@ FROZEN_CASES = [
     (267, "proofnet-267"),
 ]
 
-def prepare_targets(jsonl_path: str, out_dir: str) -> dict[str, str]:
+def sha256_file(filepath: str) -> str:
+    h = hashlib.sha256()
+    with open(filepath, "rb") as f:
+        while chunk := f.read(65536):
+            h.update(chunk)
+    return h.hexdigest()
+
+def prepare_targets(jsonl_path: str, out_dir: str, verify_source_hash: bool = True) -> dict[str, str]:
     if not os.path.isfile(jsonl_path):
         raise FileNotFoundError(f"Source JSONL dataset not found at {jsonl_path}")
+
+    if verify_source_hash:
+        actual_sha = sha256_file(jsonl_path)
+        if actual_sha != PROOFNET_CANONICAL_JSONL_SHA256:
+            raise ValueError(
+                f"Source ProofNet JSONL SHA-256 mismatch!\n"
+                f"  Expected: {PROOFNET_CANONICAL_JSONL_SHA256}\n"
+                f"  Actual:   {actual_sha}"
+            )
 
     with open(jsonl_path, "r", encoding="utf-8") as f:
         entries = [json.loads(line) for line in f if line.strip()]
@@ -63,9 +81,10 @@ def main():
     parser = argparse.ArgumentParser(description="Prepare deterministic blind targets.")
     parser.add_argument("--jsonl", default=DEFAULT_JSONL, help="Path to proofnet-verified.jsonl")
     parser.add_argument("--out-dir", default=os.path.join(PROJECT_ROOT, "targets"), help="Output directory")
+    parser.add_argument("--no-verify-source-hash", action="store_true", help="Skip source JSONL SHA-256 check")
     args = parser.parse_args()
 
-    results = prepare_targets(args.jsonl, args.out_dir)
+    results = prepare_targets(args.jsonl, args.out_dir, verify_source_hash=not args.no_verify_source_hash)
     for cid, path in results.items():
         print(f"Emitted {cid} -> {path}")
 

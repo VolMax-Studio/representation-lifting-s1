@@ -4,8 +4,8 @@
   "supersedes_transport_in": "tools/executor_config.json",
   "frozen_executor_config_sha256": "395deb97fa2b038a93ce416ced4ce3bcba31cddea30db7f3daa5ee5bc01f4b04",
   "frozen_executor_harness_sha256": "ccb1cad202fcdd2dbd931c3b8c5d65d9d368a0bdb26da8946e9b8671b07d8c48",
-  "bridge_sha256": "46c7952b64060b8bebc5a96bb1e211f3c7a687b5f914730557eb2c3cfa4abdcd",
-  "bridge_tests_sha256": "d2215c430d0845a5f984a7b109744c50c67f0e68eb308e9ac966194d7af194d9",
+  "bridge_sha256": "d9de4e4575848646ad2ad42e3288801fc6975254c6cd9e7d7cda80357f10eb67",
+  "bridge_tests_sha256": "f28f29f1b38f5c358ec41a0a94e6c28745b3cea933cead929611eabfbdd1ee8d",
   "reconnaissance_timestamp_utc": "2026-10-03T06:51:50Z",
   "surfaces": {
     "primary": {
@@ -88,8 +88,8 @@
   ],
   "fields_requiring_ivan_reconnaissance": [],
   "status": "PRIMARY_READY_FOR_REVIEW__REPLICATION_NOT_EVALUABLE_INFRA_DEFERRED",
-  "bridge_activate_sha256": "c34bd4628868ad9670e62ef9671bde0c7913b90c0ab006af9c0c832387c620ed",
-  "target_preparer_sha256": "517106d0dc0cc4514f78dd43fe9b8b65dd77a1d9f58b0ef7482daf5169882672",
-  "target_preparer_tests_sha256": "cb2a0a9ebb5c5dea17d55050ee0ce40cb995eed12e9d453b088597bb19443b3b",
-  "amendment_text_sha256": "c02fc377c8cd29c09428bfee05b515fd5228d759d06e4a1d4eb89c5eb1432022"
+  "bridge_activate_sha256": "5a100b1f8c142e9cb2b8a94a56c30a9a2a7c14d2e849b67d60b56d26ae32daec",
+  "target_preparer_sha256": "e432a9442edd1b4407d4da316447ace4b7c19bad744241f0cf7a144354f53f41",
+  "target_preparer_tests_sha256": "500b50842c809e597f6553deaa8825fddc17958fe1eb16c9df6672eaba32d870",
+  "amendment_text_sha256": "bef3169b259b802fe491a565a8390c4776b7876200b489af76ea4bb016b77ead"
 }

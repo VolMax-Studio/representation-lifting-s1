@@ -1,9 +1,9 @@
-## Amendment 0.21-A1 r5: Pre-Execution Surface Amendment
+## Amendment 0.21-A1 r7: Pre-Execution Surface Amendment
 
-**Status:** CANDIDATE — requires pre-ratification surface reconnaissance,
-bridge implementation, candidate commit, independent review, and signed
-annotated tag ratification BEFORE Gate 5, and BEFORE any executor sees blind
-theorem content  
+**Status:** CANDIDATE (r7) — remediates findings F1–F4 from independent review
+of commit 0fba42b; requires fresh independent review of exact candidate commit
+and signed annotated tag ratification BEFORE Gate 5, and BEFORE any executor
+sees blind theorem content  
 **Amendment class:** Execution-surface  
 **Trigger:** The principal investigator does not hold funded API credits on
 either the Anthropic (`api.anthropic.com`) or OpenAI (`api.openai.com`) direct
@@ -586,12 +586,14 @@ Pre-ratification surface reconnaissance (section A1.3)
   -- populate a1_transport_config.json completely
   -- implement tools/a1_surface_bridge.py
   -- implement tests/test_a1_surface_bridge.py
--> Candidate commit:
+-> Candidate commit (r7):
     AMENDMENT_A1_TRANSPORT.md
     evidence/amendment_a1/a1_transport_config.json
     tools/a1_surface_bridge.py
     tools/a1_activate.py
     tests/test_a1_surface_bridge.py
+    tools/prepare_blind_targets.py
+    tests/test_prepare_blind_targets.py
 -> Independent review of exact candidate commit
 -> Ivan Nestorov: signed annotated git tag on reviewed commit
 -> Gate 5 (section A1.11) -- verifies frozen config, sends neutral probe

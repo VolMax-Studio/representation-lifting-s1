@@ -577,20 +577,123 @@ GATE5_EXPECTED_RESPONSE = (
 )
 
 
+def verify_gate5_preflight(a1_config: dict, root_dir: Optional[str] = None) -> dict:
+    """
+    Verifies that all frozen configuration bindings and candidate assets match
+    their recorded SHA-256 hashes prior to executing the Gate 5 neutral probe (§A1.11).
+    Fail-closed: if any check fails, returns preflight_pass=False.
+    """
+    if root_dir is None:
+        root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+    bindings = {}
+    mismatches = []
+
+    # Map config key -> relative file path from root_dir
+    file_checks = [
+        ("frozen_executor_config_sha256", os.path.join("tools", "executor_config.json")),
+        ("frozen_executor_harness_sha256", os.path.join("tools", "executor_harness.py")),
+        ("bridge_sha256", os.path.join("tools", "a1_surface_bridge.py")),
+        ("bridge_tests_sha256", os.path.join("tests", "test_a1_surface_bridge.py")),
+        ("bridge_activate_sha256", os.path.join("tools", "a1_activate.py")),
+        ("target_preparer_sha256", os.path.join("tools", "prepare_blind_targets.py")),
+        ("target_preparer_tests_sha256", os.path.join("tests", "test_prepare_blind_targets.py")),
+        ("amendment_text_sha256", "AMENDMENT_A1_TRANSPORT.md"),
+    ]
+
+    for key, rel_path in file_checks:
+        expected = a1_config.get(key)
+        full_path = os.path.join(root_dir, rel_path)
+        if not os.path.isfile(full_path):
+            bindings[key] = {
+                "expected": expected,
+                "actual": None,
+                "path": rel_path,
+                "status": "FILE_NOT_FOUND"
+            }
+            mismatches.append(f"{key}: file not found at {rel_path}")
+            continue
+
+        actual = _sha256_file(full_path)
+        match = (expected == actual)
+        bindings[key] = {
+            "expected": expected,
+            "actual": actual,
+            "path": rel_path,
+            "status": "MATCH" if match else "MISMATCH"
+        }
+        if not match:
+            mismatches.append(f"{key}: expected {expected}, got {actual}")
+
+    # Primary surface binary check
+    primary = a1_config.get("surfaces", {}).get("primary", {})
+    bin_path = primary.get("executable_path")
+    expected_bin_sha = primary.get("surface_binary_sha256")
+    if bin_path:
+        if not os.path.isfile(bin_path):
+            bindings["surface_binary_sha256"] = {
+                "expected": expected_bin_sha,
+                "actual": None,
+                "path": bin_path,
+                "status": "FILE_NOT_FOUND"
+            }
+            mismatches.append(f"surface_binary: file not found at {bin_path}")
+        else:
+            actual_bin_sha = _sha256_file(bin_path)
+            match = (expected_bin_sha == actual_bin_sha)
+            bindings["surface_binary_sha256"] = {
+                "expected": expected_bin_sha,
+                "actual": actual_bin_sha,
+                "path": bin_path,
+                "status": "MATCH" if match else "MISMATCH"
+            }
+            if not match:
+                mismatches.append(f"surface_binary_sha256: expected {expected_bin_sha}, got {actual_bin_sha}")
+
+    preflight_pass = (len(mismatches) == 0)
+    return {
+        "preflight_pass": preflight_pass,
+        "failure_reason": "; ".join(mismatches) if mismatches else None,
+        "verified_bindings": bindings,
+    }
+
+
 def run_gate5_probe(
     model_id: str,
     a1_config: dict,
     artifact_dir: str,
     config: Optional[dict] = None,
+    root_dir: Optional[str] = None,
+    skip_preflight: bool = False,
 ) -> dict:
     """
-    Execute the Gate 5 neutral inference probe for a given model_id.
+    Execute the Gate 5 neutral inference probe for a given model_id (§A1.11).
     Contains ZERO blind theorem content.
-    Returns result dict with gate5_pass bool and evidence fields.
+    Fails closed if preflight configuration bindings do not match frozen state.
+    Returns result dict with gate5_pass bool, preflight verification, and evidence fields.
     """
     if config is None:
         config = {}
     transcript: list = []
+
+    # 1. Preflight config binding verification (§A1.11 fail-closed)
+    preflight = None
+    if not skip_preflight:
+        preflight = verify_gate5_preflight(a1_config, root_dir)
+        transcript.append({
+            "event": "a1_gate5_preflight_verified",
+            "preflight_pass": preflight["preflight_pass"],
+            "failure_reason": preflight["failure_reason"],
+        })
+        if not preflight["preflight_pass"]:
+            return {
+                "gate5_pass": False,
+                "failure_reason": f"PREFLIGHT_CONFIG_BINDING_MISMATCH: {preflight['failure_reason']}",
+                "preflight": preflight,
+                "transcript": transcript,
+            }
+
+    # 2. Neutral probe inference
     messages = [{"role": "user", "content": GATE5_USER_CONTENT}]
 
     response_text, stop_reason, infra_fail = a1_call_surface(
@@ -605,7 +708,12 @@ def run_gate5_probe(
         turn_number=0,
     )
     if infra_fail:
-        return {"gate5_pass": False, "failure_reason": "INFRA_FAILURE", "transcript": transcript}
+        return {
+            "gate5_pass": False,
+            "failure_reason": "INFRA_FAILURE",
+            "preflight": preflight,
+            "transcript": transcript,
+        }
 
     # Exact-match check: strip whitespace and optional code fences
     stripped = response_text.strip()
@@ -617,15 +725,27 @@ def run_gate5_probe(
     stripped = stripped.strip()
 
     exact_match = (stripped == GATE5_EXPECTED_RESPONSE)
-    return {
+    gate5_result = {
         "gate5_pass": exact_match,
         "response_text": response_text,
         "response_stripped": stripped,
         "expected": GATE5_EXPECTED_RESPONSE,
         "exact_match": exact_match,
         "failure_reason": None if exact_match else "RESPONSE_NOT_EXACT_MATCH",
+        "preflight": preflight,
         "transcript": transcript,
     }
+
+    # Record Gate 5 receipt in artifact_dir
+    os.makedirs(artifact_dir, exist_ok=True)
+    receipt_path = os.path.join(artifact_dir, "gate5_receipt.json")
+    try:
+        with open(receipt_path, "w", encoding="utf-8") as f:
+            json.dump(gate5_result, f, indent=2)
+    except OSError:
+        pass
+
+    return gate5_result
 
 
 # ---------------------------------------------------------------------------
@@ -641,6 +761,7 @@ if __name__ == "__main__":
     parser.add_argument("--model", default="claude-sonnet-4-6")
     parser.add_argument("--a1-config", default=None)
     parser.add_argument("--artifact-dir", default=None)
+    parser.add_argument("--skip-preflight", action="store_true", help="Skip preflight config checks (testing only)")
     args = parser.parse_args()
 
     if args.gate5:
@@ -648,7 +769,7 @@ if __name__ == "__main__":
         art_dir = args.artifact_dir or os.path.join(
             os.path.dirname(__file__), "..", "evidence", "amendment_a1", "gate5"
         )
-        result = run_gate5_probe(args.model, cfg, art_dir)
+        result = run_gate5_probe(args.model, cfg, art_dir, skip_preflight=args.skip_preflight)
         print(json.dumps(result, indent=2))
         sys.exit(0 if result.get("gate5_pass") else 1)
     else:
