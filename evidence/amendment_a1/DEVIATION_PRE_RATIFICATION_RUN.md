@@ -58,8 +58,10 @@ of the sealed outputs.
 ## 4. Sealing procedure (no content may be printed)
 
 Executed after `task-5524` terminates (normally or by operator termination; record which).
-Only `ls`, `sha256sum`, `tar` and `git` may touch the files. `cat`, `head`, `tail`, `less`, `grep`,
-editors, `json` pretty-printers and any agent "view" action are prohibited on these paths.
+Only path-only filesystem operations required for sealing may touch the files: `ls`/enumeration, `mkdir`,
+`tar`, `sha256sum`, `rm` after successful archive creation, and `git`. Content-reading tools are prohibited
+on these paths, including `cat`, `head`, `tail`, `less`, `grep`, editors, JSON parsers and any agent "View"
+action.
 
 ```bash
 SEAL=../rl-s1-sealed-invalid-pre-ratification
