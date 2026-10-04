@@ -10,8 +10,8 @@
   "supersedes_transport_in": "tools/executor_config.json",
   "frozen_executor_config_sha256": "395deb97fa2b038a93ce416ced4ce3bcba31cddea30db7f3daa5ee5bc01f4b04",
   "frozen_executor_harness_sha256": "ccb1cad202fcdd2dbd931c3b8c5d65d9d368a0bdb26da8946e9b8671b07d8c48",
-  "bridge_sha256": "8a0ef107b6fa91fa6f5c3660e630ecb9e85bd402d006f8c448201ae8930f6f78",
-  "bridge_tests_sha256": "122fc65e691763ef1d212c303e94093f65504df2823fe54c5faa472928a60612",
+  "bridge_sha256": "c6ee59eac5e19e5e56939ad0958288a445e14fd456834d3f7d7ea07542317f13",
+  "bridge_tests_sha256": "446395dc27293b5aeafa6752748b9b2c317f1b3c76bcd359b22fe6f8c7bd8b8d",
   "reconnaissance_timestamp_utc": "2026-10-03T06:51:50Z",
   "surfaces": {
     "primary": {

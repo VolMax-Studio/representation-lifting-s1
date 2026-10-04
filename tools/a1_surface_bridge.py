@@ -395,13 +395,12 @@ def _classify_timeout_partial_stdout(stdout_text: str) -> dict:
         (event.get("message", {}) or {}).get("model") == "<synthetic>"
         for event in assistant_events
     )
-    genuine_events = [
+    genuine_assistant_events = [
         event for event in assistant_events
         if (event.get("message", {}) or {}).get("model") != "<synthetic>"
-        and (event.get("message", {}) or {}).get("content") not in (None, "", [])
     ]
     delivered_parts = []
-    for event in genuine_events:
+    for event in genuine_assistant_events:
         content = (event.get("message", {}) or {}).get("content")
         if isinstance(content, str):
             delivered_parts.append(content)
@@ -444,7 +443,9 @@ def _classify_timeout_partial_stdout(stdout_text: str) -> dict:
         and "result" in result_event
         and not synthetic_seen
     )
-    genuine_content_delivered = bool(genuine_events or successful_result_delivered)
+    genuine_content_delivered = bool(
+        genuine_assistant_events or successful_result_delivered
+    )
     response_text = (
         result_event.get("result", "")
         if successful_result_delivered else "".join(delivered_parts)
@@ -479,6 +480,7 @@ def _classify_timeout_partial_stdout(stdout_text: str) -> dict:
             "result_error_evidence": _safe_error_fields(result_event),
             "non_json_output_seen": non_json_seen,
             "synthetic_assistant_seen": synthetic_seen,
+            "genuine_assistant_event_seen": bool(genuine_assistant_events),
             "actual_model_response_content_delivered": genuine_content_delivered,
             "error_evidence": {"exception_type": "TimeoutExpired"},
         },

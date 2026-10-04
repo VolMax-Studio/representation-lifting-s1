@@ -732,6 +732,44 @@ class TestA1SurfaceBridge(unittest.TestCase):
         self.assertEqual(manifest["final_bridge_classification"], "DELIVERED_RESPONSE_PROTOCOL_FAILURE")
         self.assertTrue(manifest["response_delivered"])
 
+    def test_r9_timeout_after_empty_genuine_assistant_event_is_nonretryable(self):
+        cfg = _make_native_surface_config(self.tmp)
+        partial = "\n".join([
+            json.dumps({
+                "type": "system", "subtype": "init", "model": "claude-sonnet-4-6",
+                "tools": [], "mcp_servers": [], "permissionMode": "default",
+            }),
+            json.dumps({
+                "type": "assistant",
+                "message": {
+                    "model": "claude-sonnet-4-6", "stop_reason": None, "content": [],
+                },
+            }),
+        ])
+        timeout = subprocess.TimeoutExpired(
+            cmd=["claude"], timeout=10, output=partial, stderr=""
+        )
+        policy = {"transport_policy": {"max_attempts_per_turn": 3, "backoff_seconds": [0, 0]}}
+        with patch.object(bridge.subprocess, "run", side_effect=timeout) as run:
+            out = bridge.a1_call_surface(
+                "claude-sonnet-4-6", [{"role": "user", "content": "x"}],
+                "sys", 60.0, policy, [], a1_config=cfg,
+                artifact_dir=self.tmp, turn_number=0,
+            )
+        self.assertEqual(out, ("", "TIMEOUT_AFTER_RESPONSE_DELIVERY", True))
+        self.assertEqual(run.call_count, 1)
+        response_path = os.path.join(self.tmp, "responses", "response_0.txt")
+        self.assertTrue(os.path.isfile(response_path))
+        with open(response_path, encoding="utf-8") as f:
+            self.assertEqual(f.read(), "")
+        with open(os.path.join(
+            self.tmp, "transport_attempts", "turn_0", "attempt_1", "attempt_metadata.json"
+        ), encoding="utf-8") as f:
+            manifest = json.load(f)
+        self.assertEqual(manifest["final_bridge_classification"], "DELIVERED_RESPONSE_PROTOCOL_FAILURE")
+        self.assertTrue(manifest["genuine_assistant_event_seen"])
+        self.assertTrue(manifest["response_delivered"])
+
     def test_r9_timeout_after_result_event_is_delivered_and_nonretryable(self):
         cfg = _make_native_surface_config(self.tmp)
         partial = "\n".join([
