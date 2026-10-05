@@ -1,0 +1,22 @@
+{
+  "schema_version": "representation-lifting-execution-index/v1",
+  "active_architecture": "provider-neutral-adapter-v1",
+  "outcome_visibility": "NONE",
+  "instances": [
+    {
+      "instance": "s1-execution-02",
+      "label": "A2",
+      "status": "HISTORICAL_SUPERSEDED_EXECUTION_INSTANCE",
+      "provider_scope": "Claude Code CLI",
+      "project_blocking": false,
+      "preserved_manifest": "evidence/execution_02/EXECUTION_MANIFEST.json"
+    },
+    {
+      "instance": "provider-neutral-next",
+      "status": "ACTIVE_EXECUTION_ARCHITECTURE",
+      "provider_scope": "adapter-selected-per-execution",
+      "project_blocking": false,
+      "default_adapter": "execution/provider-neutral-default.json"
+    }
+  ]
+}

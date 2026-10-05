@@ -5,13 +5,24 @@
 **Repository:** [https://github.com/VolMax-Studio/representation-lifting-s1](https://github.com/VolMax-Studio/representation-lifting-s1)  
 **Toolchain Target:** Lean 4 (v4.34.0) / Mathlib v4.34.0 (commit `5ed2965256430c3649e86755f9576b54eca72435`)  
 **Preregistration Specification:** [PREREGISTRATION_v0.20_CANDIDATE.md](PREREGISTRATION_v0.20_CANDIDATE.md)  
-**Status:** `ARCHITECTURE + ANALYSIS + SELECTION CUSTODY + ROOT-OF-TRUST + GATE-1 INPUT CONTRACT FROZEN / READY FOR PRE-RANDOMNESS GATES`
+**Status:** `PROVIDER-NEUTRAL EXECUTION ARCHITECTURE ACTIVE / OUTCOME VISIBILITY NONE`
 
 ---
 
 ## Overview
 
 This repository hosts the formal preregistration, tooling, calibration fixtures, and evaluation harness for `representation-lifting-s1`.
+
+The execution trust path is provider-neutral. Claude, ChatGPT, a local model, or
+another surface may transport a particular model-under-test execution, but no
+provider is the audit authority or a project-wide availability gate. The stable
+adapter contract, immediate contract-only Gate 5, manual web relay path without
+personal API billing, and execution commands are documented in
+[EXECUTION_ARCHITECTURE.md](EXECUTION_ARCHITECTURE.md).
+
+Historical r8/r9, `INFRA_RECOVERY_01`, and A2/`EXECUTION_02` provenance is
+preserved. A2 is historical/superseded; its Claude availability window does not
+block the active architecture.
 
 ### Claim-of-Record
 > `representation-lifting-s1` is a preregistered case-study evaluation of whether a representation-first formalization strategy can:
@@ -146,6 +157,5 @@ python3 tests/test_build_pool.py        # Verifies deterministic pool builder, p
     - External public timestamp anchor rules formalized: the anchor must record the SHA-256 of the **entire `pool_bundle_manifest.json` file**, cryptographically binding source metadata, builder code, and all output file hashes.
     - Added unmocked real Lean integration test in `tests/test_build_pool.py` verifying real `lake env lean` execution on CI runner across major categories (`rfl`, `ring`, non-trivial, broken syntax).
     - `MANIFEST.sha256` updated to cover all 113 payload files with 0 failures on `sha256sum -c`.
-
 
 

@@ -12,6 +12,7 @@ tools/execution_receipt_*.json
 *.swp
 *.tmp
 tmp/
+execution-runs/
 *.zip
 .lake_*_build_*
 .lake_build_temp*

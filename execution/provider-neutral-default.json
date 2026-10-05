@@ -1,0 +1,17 @@
+{
+  "schema_version": "representation-lifting-execution-adapter/v1",
+  "adapter_id": "manual-relay-v1",
+  "kind": "manual-relay",
+  "trust_role": "TRANSPORT_ONLY_NOT_TRUST_ROOT",
+  "credentials": "OPERATOR_SUPPLIED_OUTSIDE_REPOSITORY",
+  "direct_api_required": false,
+  "request_schema": "representation-lifting-model-request/v1",
+  "result_schema": "representation-lifting-model-result/v1",
+  "system_role_handling": "EXPLICIT_DETERMINISTIC_FLATTENING",
+  "message_history_handling": "EXPLICIT_DETERMINISTIC_FLATTENING",
+  "supported_surfaces": [
+    "ChatGPT or another web UI via operator courier",
+    "local model via an operator-selected command adapter",
+    "provider CLI via an operator-selected command adapter"
+  ]
+}
