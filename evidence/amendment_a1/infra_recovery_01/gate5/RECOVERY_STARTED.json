@@ -1,0 +1,8 @@
+{
+  "amendment": "INFRA_RECOVERY_01",
+  "maximum_recovery_executions": 1,
+  "ratification_tag": "representation-lifting-s1-infra-recovery-01",
+  "ratified_commit": "cbc3cdea97d50d7c8078308d1decd6589cbbdbe9",
+  "schema_version": "representation-lifting-infra-recovery-start/v1",
+  "started_at_utc": "2026-10-04T22:29:33.839438+00:00"
+}

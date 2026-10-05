@@ -1,0 +1,14 @@
+{
+  "schema_version": "representation-lifting-a1-request/v1",
+  "turn_number": 0,
+  "model_id": "claude-sonnet-4-6",
+  "system_prompt": "Gate 5 smoke test. Follow the user instruction exactly.",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Respond with exactly the following JSON and nothing else:\n{\"status\": \"ok\", \"probe\": \"representation-lifting-s1-gate5\"}"
+    }
+  ],
+  "timestamp_utc": "2026-10-04T22:29:34.289147+00:00",
+  "sha256": "251a142a47c2c3f1fa7e3c1b27967c13cde312a55c208e083543f52dfa33b564"
+}

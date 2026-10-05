@@ -1,0 +1,80 @@
+{
+  "schema_version": "representation-lifting-execution-instance/v1",
+  "instance": "s1-execution-02",
+  "amendment_label": "A2",
+  "status": "CANDIDATE_AWAITING_SIGNED_TAG_RATIFICATION",
+  "required_ratification_tag": "representation-lifting-s1-execution-02",
+  "evidence_namespace": "evidence/execution_02/run",
+  "outcome_visibility": "NONE",
+  "experimental_block_status": "NOT_STARTED",
+  "hypotheses_status": "NOT_EVALUATED",
+  "transport_surface": "claude-code-cli",
+  "authentication": "Claude Pro OAuth subscription",
+  "direct_anthropic_api_prohibited": true,
+  "model_id": "claude-sonnet-4-6",
+  "prior_ratifications": [
+    {
+      "name": "A1 r9",
+      "tag": "representation-lifting-s1-amendment-a1-r9",
+      "commit": "cf4d3a09e1a3bcc9c2496edd38d71b99f2f8a5b1"
+    },
+    {
+      "name": "INFRA_RECOVERY_01",
+      "tag": "representation-lifting-s1-infra-recovery-01",
+      "commit": "cbc3cdea97d50d7c8078308d1decd6589cbbdbe9"
+    }
+  ],
+  "consumed_recovery_evidence": {
+    "path": "evidence/amendment_a1/infra_recovery_01/gate5",
+    "file_count": 25,
+    "tree_hash_algorithm": "sha256(sorted(relative_path + NUL + file_sha256 + LF))",
+    "tree_sha256": "1f5ab9494cccb5cde3e38d560cc2f6664a4e79617319d55851ca28b87c75736b",
+    "attempts": 3,
+    "classification": "PRE_RESPONSE_TRANSPORT_FAILURE",
+    "provider_error": "rate_limit",
+    "response_delivered": false,
+    "experimental_block_started": false,
+    "provider_availability_message": "weekly limit; resets 2026-10-07 04:00 Europe/Belgrade"
+  },
+  "availability_policy": {
+    "retry_eligibility": "PRE_RESPONSE_TRANSPORT_FAILURE_AND_RESPONSE_DELIVERED_FALSE_ONLY",
+    "delivered_response_disposition": "FINAL_NON_RETRYABLE",
+    "ambiguous_delivery_disposition": "FINAL_FAIL_CLOSED_NON_RETRYABLE",
+    "max_attempts_per_logical_turn": 4,
+    "backoff_seconds": [21600, 86400, 259200],
+    "availability_wait_excluded_from_scientific_wallclock": true,
+    "gate5_not_before": "2026-10-07T04:05:00+02:00",
+    "gate5_start_deadline": "2026-10-14T04:05:00+02:00",
+    "exhaustion_disposition": "NOT_EVALUABLE_INFRA_NO_FURTHER_RECOVERY"
+  },
+  "block_order": [
+    "negative_control",
+    "calibration_fibonacci",
+    "calibration_pell",
+    "calibration_roots_of_unity",
+    "proofnet-108",
+    "proofnet-083",
+    "proofnet-267"
+  ],
+  "pre_outcome_audit_required": true,
+  "a1_transport_config": {
+    "path": "evidence/amendment_a1/a1_transport_config.json",
+    "sha256": "abc12c7b04f6ff4d040093430869419b12f820a0cc88c21ba1786831e6f82329"
+  },
+  "frozen_executor_config": {
+    "path": "tools/executor_config.json",
+    "sha256": "395deb97fa2b038a93ce416ced4ce3bcba31cddea30db7f3daa5ee5bc01f4b04"
+  },
+  "critical_file_bindings": [
+    {"path": "EXECUTION_02.md", "sha256": "d73cb5c065138114a5a3a155c7dfb0e932d3fafe8f1b3f3dc387836776be9bfe"},
+    {"path": "tools/execution_02.py", "sha256": "67c21454df0dad67e260dcdd4c4b4e1dcc8246a4e3f499af93a52eb087b468de"},
+    {"path": "tests/test_execution_02.py", "sha256": "ca99447bb501975ebf0c07df245e30f311f84cd581b83290943dc72bf0325aae"},
+    {"path": "evidence/amendment_a1/a1_transport_config.json", "sha256": "abc12c7b04f6ff4d040093430869419b12f820a0cc88c21ba1786831e6f82329"},
+    {"path": "tools/a1_surface_bridge.py", "sha256": "c6ee59eac5e19e5e56939ad0958288a445e14fd456834d3f7d7ea07542317f13"},
+    {"path": "tools/a1_activate.py", "sha256": "219667022aa1984ac7334294b8b491f2d0131ebee8e82417de14f8baf88e56b5"},
+    {"path": "tools/executor_config.json", "sha256": "395deb97fa2b038a93ce416ced4ce3bcba31cddea30db7f3daa5ee5bc01f4b04"},
+    {"path": "tools/executor_harness.py", "sha256": "ccb1cad202fcdd2dbd931c3b8c5d65d9d368a0bdb26da8946e9b8671b07d8c48"},
+    {"path": "INFRA_RECOVERY_01.md", "sha256": "da9b09050afc13e979d3ec38f8830ffb51134078235bdaada7c76cefe7bbaa10"},
+    {"path": "evidence/amendment_a1/INFRA_RECOVERY_01_CONFIG.json", "sha256": "668f5b784cb117256dedbe546308b3d96d4443edae38322cb9e4a6c6d472fdd6"}
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "schema_version": "representation-lifting-a1-transport-metadata/v1",
+  "turn_number": 0,
+  "timestamp_utc": "2026-10-04T22:30:03.122482+00:00",
+  "model_returned": "claude-sonnet-4-6",
+  "assistant_model": "<synthetic>",
+  "tools": [],
+  "mcp_servers": [],
+  "permission_mode": "default",
+  "stop_reason": "PRE_RESPONSE_TRANSPORT_FAILURE",
+  "is_infra_failure": true,
+  "response_delivered": false,
+  "final_bridge_classification": "PRE_RESPONSE_TRANSPORT_FAILURE",
+  "transport_attempts": [
+    {
+      "attempt_number": 1,
+      "manifest_path": "/home/volmax-studio/volmax-projects/iot2/PORTFOLIO/representation-lifting-s1/evidence/amendment_a1/infra_recovery_01/gate5/transport_attempts/turn_0/attempt_1/attempt_metadata.json",
+      "manifest_sha256": "fc4dd29ac3e4ecf1eacf0bed7ed274ea2832f9bb387a90d8636be1be1467102b",
+      "classification": "PRE_RESPONSE_TRANSPORT_FAILURE",
+      "response_delivered": false
+    },
+    {
+      "attempt_number": 2,
+      "manifest_path": "/home/volmax-studio/volmax-projects/iot2/PORTFOLIO/representation-lifting-s1/evidence/amendment_a1/infra_recovery_01/gate5/transport_attempts/turn_0/attempt_2/attempt_metadata.json",
+      "manifest_sha256": "aba10d584672363a18ccb955d22bc07f510b6e9cd3776f84325c5d7feebf8456",
+      "classification": "PRE_RESPONSE_TRANSPORT_FAILURE",
+      "response_delivered": false
+    },
+    {
+      "attempt_number": 3,
+      "manifest_path": "/home/volmax-studio/volmax-projects/iot2/PORTFOLIO/representation-lifting-s1/evidence/amendment_a1/infra_recovery_01/gate5/transport_attempts/turn_0/attempt_3/attempt_metadata.json",
+      "manifest_sha256": "9a94696195050c58ba76d8ece1602f2894ff702812975febc28e09a4b481e3fd",
+      "classification": "PRE_RESPONSE_TRANSPORT_FAILURE",
+      "response_delivered": false
+    }
+  ],
+  "attempts_used": 3,
+  "frozen_max_attempts": 3,
+  "retry_exhausted": true,
+  "sha256": "ec2bd66d23b5381da572979543bbc512b9f0309015b7e53155f5d288ec7f3d4e"
+}

@@ -1,0 +1,38 @@
+{
+  "actual_model_response_content_delivered": false,
+  "assistant_error_evidence": [
+    {
+      "error": "rate_limit",
+      "type": "assistant"
+    }
+  ],
+  "assistant_model": "<synthetic>",
+  "attempt_number": 3,
+  "cli_return_code": 1,
+  "final_bridge_classification": "PRE_RESPONSE_TRANSPORT_FAILURE",
+  "init_model": "claude-sonnet-4-6",
+  "is_api_error_message": false,
+  "non_json_output_seen": false,
+  "raw_stderr": {
+    "path": "raw_stderr.txt",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "raw_stdout": {
+    "path": "raw_stdout.stream.jsonl",
+    "sha256": "4830c93cc1b8c4b640b6850c9211dad91179a32c6849a25689554427c74820b9"
+  },
+  "redactions_applied": false,
+  "response_delivered": false,
+  "result_error_evidence": {
+    "is_error": true,
+    "subtype": "success",
+    "type": "result"
+  },
+  "result_is_error": true,
+  "result_subtype": "success",
+  "schema_version": "representation-lifting-a1-transport-attempt/v1",
+  "stream_error_evidence": [],
+  "synthetic_assistant_seen": true,
+  "timestamp_utc": "2026-10-04T22:30:03.122197+00:00",
+  "turn_number": 0
+}
