@@ -33,6 +33,20 @@ SCIENTIFIC_BINDINGS = (
     "tools/prepare_blind_targets.py",
     "tools/pool_custody.py",
 )
+EXPECTED_SEALED_BRANCHES = 29
+
+
+def expected_execution_receipts(model_id: str) -> tuple[str, ...]:
+    """Return the seven model-bound receipts required for a complete block."""
+    return (
+        f"execution_receipt_control_{model_id}.json",
+        f"execution_receipt_calibration_fibonacci_{model_id}.json",
+        f"execution_receipt_calibration_pell_{model_id}.json",
+        f"execution_receipt_calibration_roots_of_unity_{model_id}.json",
+        f"execution_receipt_blind_proofnet-108_{model_id}.json",
+        f"execution_receipt_blind_proofnet-083_{model_id}.json",
+        f"execution_receipt_blind_proofnet-267_{model_id}.json",
+    )
 
 
 def load_json(path: Path) -> dict:
@@ -238,13 +252,25 @@ def audit_custody(run_root: Path, adapter_path: Path, execution_id: str, model_i
     turns = sorted((block / "branch_artifacts").glob("*/*/turn_*"))
     if not turns:
         raise RuntimeError("NO_TRANSPORT_TURNS_FOUND")
-    failures = {turn.name: verify_turn_custody(turn) for turn in turns}
+    failures = {
+        turn.relative_to(block).as_posix(): verify_turn_custody(turn)
+        for turn in turns
+    }
     failures = {name: result for name, result in failures.items() if not result["custody_pass"]}
     if failures:
         raise RuntimeError("TURN_CUSTODY_FAIL:" + json.dumps(failures, sort_keys=True))
+
+    expected_receipts = expected_execution_receipts(model_id)
+    receipt_dir = block / "receipts"
+    for name in expected_receipts:
+        if not (receipt_dir / name).is_file():
+            raise RuntimeError(f"EXPECTED_RECEIPT_MISSING:{name}")
+
     seals = sorted((block / "sealed_transcripts").glob("*.tar"))
-    if not seals:
-        raise RuntimeError("NO_SEALED_BRANCH_TRANSCRIPTS")
+    if len(seals) != EXPECTED_SEALED_BRANCHES:
+        raise RuntimeError(
+            f"SEALED_BRANCH_COUNT_MISMATCH:expected={EXPECTED_SEALED_BRANCHES}:actual={len(seals)}"
+        )
     for seal in seals:
         sidecar = Path(str(seal) + ".sha256")
         if not sidecar.is_file() or sidecar.read_text(encoding="utf-8").split()[0] != sha256_file(seal):
@@ -252,6 +278,7 @@ def audit_custody(run_root: Path, adapter_path: Path, execution_id: str, model_i
     receipt = {
         "schema_version": "representation-lifting-provider-neutral-pre-outcome-audit/v1",
         "execution_id": execution_id, "declared_model_id": model_id,
+        "expected_receipts_present": len(expected_receipts),
         "transport_turns_verified": len(turns), "sealed_branches_verified": len(seals),
         "audit_pass": True, "outcome_content_opened": False, "outcome_visibility": "NONE",
         "audited_at_utc": datetime.now(timezone.utc).isoformat(),

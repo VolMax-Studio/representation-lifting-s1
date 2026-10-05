@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 
+import hashlib
 import json
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
@@ -33,6 +35,26 @@ def command_config(command):
 
 
 class TestExecutionAdapter(unittest.TestCase):
+    def _audit_tree(self, root, model_id="local-test-model", seal_count=29, omit_receipt=None):
+        block = root / "block"
+        (block / "branch_artifacts" / "case-001" / "D" / "turn_0000").mkdir(parents=True)
+        (block / "SEALED_BLOCK_INDEX.json").write_text("{}\n", encoding="utf-8")
+        receipt_dir = block / "receipts"
+        receipt_dir.mkdir()
+        for name in neutral.expected_execution_receipts(model_id):
+            if name != omit_receipt:
+                (receipt_dir / name).write_text("{}\n", encoding="utf-8")
+        sealed_dir = block / "sealed_transcripts"
+        sealed_dir.mkdir()
+        for index in range(seal_count):
+            seal = sealed_dir / f"sealed_branch_{index:02d}.tar"
+            payload = f"sealed-{index}".encode()
+            seal.write_bytes(payload)
+            Path(str(seal) + ".sha256").write_text(
+                hashlib.sha256(payload).hexdigest() + "\n", encoding="utf-8"
+            )
+        return block
+
     def test_default_contract_is_provider_neutral_and_secret_free(self):
         config = json.loads(neutral.DEFAULT_ADAPTER.read_text(encoding="utf-8"))
         result = validate_adapter_config(config)
@@ -119,6 +141,57 @@ class TestExecutionAdapter(unittest.TestCase):
             self.assertEqual(metadata["declared_model_id"], "local-test-model")
             self.assertEqual(metadata["observed_model_id"], "local-test-model")
             self.assertTrue(metadata["response_delivered"])
+
+    def test_audit_custody_does_not_hide_same_named_turn_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            block = root / "block"
+            bad = block / "branch_artifacts" / "case-001" / "a_bad" / "turn_0000"
+            good = block / "branch_artifacts" / "case-001" / "z_good" / "turn_0000"
+            bad.mkdir(parents=True)
+            good.mkdir(parents=True)
+            (block / "SEALED_BLOCK_INDEX.json").write_text("{}\n", encoding="utf-8")
+
+            def custody(turn):
+                return {"custody_pass": turn != bad}
+
+            with mock.patch.object(neutral, "require_gate5"), mock.patch.object(
+                neutral, "verify_turn_custody", side_effect=custody
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "TURN_CUSTODY_FAIL:.*branch_artifacts/case-001/a_bad/turn_0000",
+                ):
+                    neutral.audit_custody(
+                        root, neutral.DEFAULT_ADAPTER, "execution-test", "local-test-model"
+                    )
+
+    def test_audit_custody_rejects_missing_sealed_branch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._audit_tree(root, seal_count=28)
+            with mock.patch.object(neutral, "require_gate5"), mock.patch.object(
+                neutral, "verify_turn_custody", return_value={"custody_pass": True}
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError, "SEALED_BRANCH_COUNT_MISMATCH:expected=29:actual=28"
+                ):
+                    neutral.audit_custody(
+                        root, neutral.DEFAULT_ADAPTER, "execution-test", "local-test-model"
+                    )
+
+    def test_audit_custody_rejects_missing_execution_receipt(self):
+        missing = "execution_receipt_blind_proofnet-267_local-test-model.json"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._audit_tree(root, omit_receipt=missing)
+            with mock.patch.object(neutral, "require_gate5"), mock.patch.object(
+                neutral, "verify_turn_custody", return_value={"custody_pass": True}
+            ):
+                with self.assertRaisesRegex(RuntimeError, f"EXPECTED_RECEIPT_MISSING:{missing}"):
+                    neutral.audit_custody(
+                        root, neutral.DEFAULT_ADAPTER, "execution-test", "local-test-model"
+                    )
 
 
 if __name__ == "__main__":
