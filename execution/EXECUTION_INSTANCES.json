@@ -16,7 +16,9 @@
       "status": "ACTIVE_EXECUTION_ARCHITECTURE",
       "provider_scope": "adapter-selected-per-execution",
       "project_blocking": false,
-      "default_adapter": "execution/provider-neutral-default.json"
+      "default_adapter": "execution/provider-neutral-default.json",
+      "default_transport": "AUTOMATED_COMMAND_ADAPTER",
+      "manual_relay_policy": "DEBUG_FALLBACK_ONLY_NOT_PRODUCTION_DEFAULT"
     }
   ]
 }

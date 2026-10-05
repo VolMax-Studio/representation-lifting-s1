@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import ast
 import hashlib
 import json
 import sys
@@ -61,6 +62,27 @@ class TestExecutionAdapter(unittest.TestCase):
         self.assertTrue(result["contract_pass"], result["errors"])
         self.assertFalse(config["direct_api_required"])
         self.assertEqual(config["trust_role"], "TRANSPORT_ONLY_NOT_TRUST_ROOT")
+        self.assertEqual(config["kind"], "command")
+        self.assertIn("codex_subscription_adapter.py", " ".join(config["command"]))
+
+    def test_codex_adapter_uses_isolated_tool_free_cli_profile(self):
+        source = (REPO_ROOT / "tools" / "codex_subscription_adapter.py").read_text(
+            encoding="utf-8"
+        )
+        tree = ast.parse(source)
+        command_literals = {
+            node.value
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        }
+        self.assertIn("--ignore-user-config", command_literals)
+        self.assertIn("shell_tool", command_literals)
+        self.assertIn("plugins", command_literals)
+        self.assertIn("apps", command_literals)
+        self.assertIn("remote_plugin", command_literals)
+        self.assertIn('web_search="disabled"', command_literals)
+        self.assertIn("CODEX_APP_TOOLS_PIPE_PATH", command_literals)
+        self.assertIn("--ignore-rules", command_literals)
 
     def test_contract_rejects_embedded_credentials(self):
         config = command_config(["/bin/true"])
@@ -192,6 +214,92 @@ class TestExecutionAdapter(unittest.TestCase):
                     neutral.audit_custody(
                         root, neutral.DEFAULT_ADAPTER, "execution-test", "local-test-model"
                     )
+
+    def test_abort_manual_relay_preserves_hash_inventory_and_visibility(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            gate = root / "gate5"
+            turn = root / "block" / "branch_artifacts" / "control" / "D" / "turn_0001"
+            gate.mkdir(parents=True)
+            turn.mkdir(parents=True)
+            manual = json.loads((REPO_ROOT / "execution" / "manual-relay-debug.json").read_text())
+            (gate / "adapter_contract.json").write_text(json.dumps(manual), encoding="utf-8")
+            (turn / "request.json").write_text('{"sealed":"bytes"}', encoding="utf-8")
+            receipt = neutral.abort_manual_relay(root, "execution-test")
+            self.assertEqual(receipt["execution_status"], "ABORTED_MANUAL_RELAY")
+            self.assertEqual(receipt["admissibility"], "NOT_ADMISSIBLE")
+            self.assertEqual(receipt["outcome_visibility"], "NONE")
+            self.assertFalse(receipt["outcome_content_opened"])
+            self.assertIn(
+                "block/branch_artifacts/control/D/turn_0001/request.json",
+                receipt["preserved_file_sha256"],
+            )
+            self.assertEqual((turn / "request.json").read_text(), '{"sealed":"bytes"}')
+
+    def test_turn_custody_rejects_tampered_transport_evidence(self):
+        program = (
+            "import hashlib,json,os,sys; r=json.load(sys.stdin); "
+            "p=os.path.join(os.environ['EXECUTION_ADAPTER_TURN_DIR'],'identity.json'); "
+            "open(p,'w').write('observed'); h=hashlib.sha256(b'observed').hexdigest(); "
+            "json.dump({'schema_version':'%s','response_text':'answer',"
+            "'observed_model_id':r['declared_model_id'],'delivery_status':'DELIVERED',"
+            "'started_at_utc':'start','completed_at_utc':'end',"
+            "'transport_metadata':{'evidence_files':{'identity.json':h}}},sys.stdout)"
+        ) % RESULT_SCHEMA
+        adapter = CommandAdapter(command_config([sys.executable, "-c", program]))
+        request = ModelRequest("test-run", 0, "model", "system", [], "now")
+        with tempfile.TemporaryDirectory() as tmp:
+            turn = Path(tmp) / "turn"
+            adapter.execute(request, turn, 10)
+            self.assertTrue(verify_turn_custody(turn)["custody_pass"])
+            (turn / "identity.json").write_text("tampered", encoding="utf-8")
+            self.assertFalse(verify_turn_custody(turn)["custody_pass"])
+
+    def test_abort_inference_control_preserves_partial_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            gate = root / "gate5"
+            turn = root / "block" / "branch_artifacts" / "control" / "D" / "turn_0000"
+            gate.mkdir(parents=True)
+            turn.mkdir(parents=True)
+            (gate / "adapter_contract.json").write_text('{"kind":"command"}', encoding="utf-8")
+            (turn / "codex_events.jsonl").write_text("tool event", encoding="utf-8")
+            receipt = neutral.abort_inference_control(root, "execution-test")
+            self.assertEqual(receipt["execution_status"], "ABORTED_INFERENCE_CONTROL")
+            self.assertEqual(receipt["admissibility"], "NOT_ADMISSIBLE")
+            self.assertEqual(receipt["outcome_visibility"], "NONE")
+            self.assertIn(
+                "block/branch_artifacts/control/D/turn_0000/codex_events.jsonl",
+                receipt["preserved_file_sha256"],
+            )
+
+    def test_skipped_control_flow_branches_are_explicitly_sealed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            block = Path(tmp) / "block"
+            sealed = block / "sealed_transcripts"
+            sealed.mkdir(parents=True)
+            existing = sealed / "sealed_control_D_model.tar"
+            existing.write_bytes(b"executed")
+            Path(str(existing) + ".sha256").write_text(
+                hashlib.sha256(b"executed").hexdigest() + "  " + existing.name + "\n",
+                encoding="utf-8",
+            )
+            created = neutral.materialize_skipped_branch_seals(block, "execution-test", "model")
+            self.assertEqual(created, neutral.EXPECTED_SEALED_BRANCHES - 1)
+            self.assertEqual(len(list(sealed.glob("*.tar"))), neutral.EXPECTED_SEALED_BRANCHES)
+            marker = json.loads((
+                block / "branch_artifacts" / "proofnet-267" / "L" / "SKIPPED_BRANCH.json"
+            ).read_text())
+            self.assertEqual(marker["execution_status"], "NOT_EXECUTED_FROZEN_CONTROL_FLOW")
+            self.assertFalse(marker["model_contacted"])
+            self.assertEqual(marker["outcome_visibility"], "NONE")
+
+    def test_skipped_seal_refuses_executed_unsealed_branch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            block = Path(tmp) / "block"
+            (block / "branch_artifacts" / "control" / "D" / "turn_0000").mkdir(parents=True)
+            with self.assertRaisesRegex(RuntimeError, "EXECUTED_BRANCH_SEAL_MISSING:control:D"):
+                neutral.materialize_skipped_branch_seals(block, "execution-test", "model")
 
 
 if __name__ == "__main__":

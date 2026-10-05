@@ -16,12 +16,26 @@ window is a trust root.
 - start/completion timestamps and transport metadata;
 - SHA-256 custody for every request, result, and delivered response.
 
-The default adapter is an operator-courier manual relay. It works with an
-available web surface and requires no personal API billing. A command adapter
-supports a local model or an operator-selected provider CLI using the same JSON
-contract. Credentials, when a chosen surface needs them, are supplied by the
-operator outside the repository. Direct Anthropic and OpenAI APIs are optional,
-not dependencies.
+The production default is an automated command adapter backed by the installed
+Codex CLI and its existing ChatGPT subscription authentication. It requires no
+direct OpenAI or Anthropic API key and creates per-turn runtime identity evidence
+from Codex's `session_meta` and `turn_context` records. The command adapter uses
+the same JSON contract as every other transport. Credentials remain outside the
+repository. Direct Anthropic and OpenAI APIs are not used by this path. The CLI
+runs with user configuration ignored, disables plugins/apps, and removes the
+desktop app-tools pipe so installed plugins and MCP servers are not exposed;
+native web search and the shell tool are also explicitly disabled. Any model
+tool event is a fail-closed transport error, preserving the frozen no-tool
+inference regime.
+Branches not instantiated because of the frozen harness's preregistered
+control flow receive custody-only `NOT_EXECUTED_FROZEN_CONTROL_FLOW` seals
+before the block index is written. Thus all 29 registered branch positions are
+cryptographically accounted for without fabricating a model response.
+
+The operator-courier adapter is retained only in
+`execution/manual-relay-debug.json` as an explicit fallback for debugging. It is
+not the production default and a run which used it cannot be silently continued
+as an automated admissible execution.
 
 Gate 5 now validates the selected adapter contract, the custody guarantees, and
 the bound scientific files. It deliberately performs no provider call and no
@@ -54,7 +68,6 @@ python3 tools/provider_neutral_execution.py \
   --run-root execution-runs/execution-03
 ```
 
-For each turn, copy the generated `relay_input.txt` verbatim to the chosen
-surface, save the complete response to `incoming_response.txt`, and record the
-surface-displayed identity in `incoming_identity.json`. After the block seals,
-run `--audit-custody` with the same arguments before opening outcomes.
+The default command performs every turn without operator courier steps. After
+the block seals, run `--audit-custody` with the same arguments before opening
+outcomes.

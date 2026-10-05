@@ -12,6 +12,7 @@ import argparse
 import json
 import subprocess
 import sys
+import tarfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -34,6 +35,14 @@ SCIENTIFIC_BINDINGS = (
     "tools/pool_custody.py",
 )
 EXPECTED_SEALED_BRANCHES = 29
+EXPECTED_BRANCH_KEYS = (
+    ("control", "D"), ("control", "L"),
+    *((family, branch) for family in (
+        "calibration_fibonacci", "calibration_pell", "calibration_roots_of_unity"
+    ) for branch in ("D1", "D2", "S1", "L1", "S2", "L2")),
+    *((case, branch) for case in ("proofnet-108", "proofnet-083", "proofnet-267")
+      for branch in ("D", "S", "L")),
+)
 
 
 def expected_execution_receipts(model_id: str) -> tuple[str, ...]:
@@ -47,6 +56,49 @@ def expected_execution_receipts(model_id: str) -> tuple[str, ...]:
         f"execution_receipt_blind_proofnet-083_{model_id}.json",
         f"execution_receipt_blind_proofnet-267_{model_id}.json",
     )
+
+
+def materialize_skipped_branch_seals(block: Path, execution_id: str, model_id: str) -> int:
+    """Seal custody-only markers for branches skipped by frozen harness control flow."""
+    sealed_dir = block / "sealed_transcripts"
+    sealed_dir.mkdir(parents=True, exist_ok=True)
+    created = 0
+    for case_id, branch_label in EXPECTED_BRANCH_KEYS:
+        seal = sealed_dir / f"sealed_{case_id}_{branch_label}_{model_id}.tar"
+        if seal.exists():
+            continue
+        branch_dir = block / "branch_artifacts" / case_id / branch_label
+        if branch_dir.exists() and any(branch_dir.glob("turn_*")):
+            raise RuntimeError(f"EXECUTED_BRANCH_SEAL_MISSING:{case_id}:{branch_label}")
+        branch_dir.mkdir(parents=True, exist_ok=True)
+        marker = {
+            "schema_version": "representation-lifting-skipped-branch-custody/v1",
+            "execution_id": execution_id,
+            "declared_model_id": model_id,
+            "case_id": case_id,
+            "branch_label": branch_label,
+            "execution_status": "NOT_EXECUTED_FROZEN_CONTROL_FLOW",
+            "model_contacted": False,
+            "outcome_content_opened": False,
+            "outcome_visibility": "NONE",
+        }
+        marker_path = branch_dir / "SKIPPED_BRANCH.json"
+        marker_bytes = canonical_json_bytes(marker)
+        marker_path.write_bytes(marker_bytes)
+        (branch_dir / "SKIPPED_BRANCH.json.sha256").write_text(
+            sha256_bytes(marker_bytes) + "\n", encoding="utf-8"
+        )
+        with tarfile.open(seal, "w") as archive:
+            archive.add(marker_path, arcname="SKIPPED_BRANCH.json")
+            archive.add(
+                branch_dir / "SKIPPED_BRANCH.json.sha256",
+                arcname="SKIPPED_BRANCH.json.sha256",
+            )
+        Path(str(seal) + ".sha256").write_text(
+            f"{sha256_file(seal)}  {seal.name}\n", encoding="utf-8"
+        )
+        created += 1
+    return created
 
 
 def load_json(path: Path) -> dict:
@@ -236,10 +288,13 @@ def execute_block(adapter_path: Path, run_root: Path, execution_id: str, model_i
     (block / "BLOCK_STARTED.json").write_bytes(canonical_json_bytes(started))
     for _, job in jobs:
         job()
+    skipped_seals = materialize_skipped_branch_seals(block, execution_id, model_id)
     index = {
         **started,
         "completed_at_utc": datetime.now(timezone.utc).isoformat(),
         "pre_outcome_audit": "REQUIRED",
+        "sealed_branch_count": EXPECTED_SEALED_BRANCHES,
+        "skipped_branch_custody_seals": skipped_seals,
     }
     (block / "SEALED_BLOCK_INDEX.json").write_bytes(canonical_json_bytes(index))
 
@@ -287,6 +342,114 @@ def audit_custody(run_root: Path, adapter_path: Path, execution_id: str, model_i
     return receipt
 
 
+def abort_manual_relay(run_root: Path, execution_id: str) -> dict:
+    """Seal an incomplete manual-courier run as permanently non-admissible.
+
+    Existing bytes are only hashed, never interpreted or changed.  In
+    particular this function never reads response or receipt content.
+    """
+    marker = run_root / "ABORTED_MANUAL_RELAY.json"
+    if marker.exists():
+        raise RuntimeError("ABORT_MARKER_ALREADY_EXISTS")
+    contract_path = run_root / "gate5" / "adapter_contract.json"
+    if not contract_path.is_file():
+        raise RuntimeError("GATE5_ADAPTER_CONTRACT_MISSING")
+    contract = load_json(contract_path)
+    if contract.get("kind") != "manual-relay":
+        raise RuntimeError("RUN_DID_NOT_USE_MANUAL_RELAY")
+    if (run_root / "block" / "SEALED_BLOCK_INDEX.json").exists():
+        raise RuntimeError("REFUSING_TO_ABORT_SEALED_BLOCK")
+    inventory = {
+        path.relative_to(run_root).as_posix(): sha256_file(path)
+        for path in sorted(run_root.rglob("*"))
+        if path.is_file() and path != marker and path != Path(str(marker) + ".sha256")
+    }
+    receipt = {
+        "schema_version": "representation-lifting-aborted-manual-relay/v1",
+        "execution_id": execution_id,
+        "execution_status": "ABORTED_MANUAL_RELAY",
+        "admissibility": "NOT_ADMISSIBLE",
+        "reason": "Operator-courier transport was used in a production execution.",
+        "existing_provenance_preserved": True,
+        "preserved_file_sha256": inventory,
+        "outcome_content_opened": False,
+        "outcome_visibility": "NONE",
+        "aborted_at_utc": datetime.now(timezone.utc).isoformat(),
+    }
+    marker_bytes = canonical_json_bytes(receipt)
+    marker.write_bytes(marker_bytes)
+    Path(str(marker) + ".sha256").write_text(sha256_bytes(marker_bytes) + "\n", encoding="utf-8")
+    return receipt
+
+
+def abort_inference_control(run_root: Path, execution_id: str) -> dict:
+    """Preserve and disqualify a partial run that exposed forbidden model tools."""
+    marker = run_root / "ABORTED_INFERENCE_CONTROL.json"
+    if marker.exists():
+        raise RuntimeError("ABORT_MARKER_ALREADY_EXISTS")
+    if not (run_root / "gate5" / "adapter_contract.json").is_file():
+        raise RuntimeError("GATE5_ADAPTER_CONTRACT_MISSING")
+    if (run_root / "block" / "SEALED_BLOCK_INDEX.json").exists():
+        raise RuntimeError("REFUSING_TO_ABORT_SEALED_BLOCK")
+    inventory = {
+        path.relative_to(run_root).as_posix(): sha256_file(path)
+        for path in sorted(run_root.rglob("*"))
+        if path.is_file() and path != marker and path != Path(str(marker) + ".sha256")
+    }
+    receipt = {
+        "schema_version": "representation-lifting-aborted-inference-control/v1",
+        "execution_id": execution_id,
+        "execution_status": "ABORTED_INFERENCE_CONTROL",
+        "admissibility": "NOT_ADMISSIBLE",
+        "reason": "The command surface exposed shell-tool events; frozen no-tool inference controls require a clean restart.",
+        "existing_provenance_preserved": True,
+        "preserved_file_sha256": inventory,
+        "outcome_content_opened": False,
+        "outcome_visibility": "NONE",
+        "aborted_at_utc": datetime.now(timezone.utc).isoformat(),
+    }
+    marker_bytes = canonical_json_bytes(receipt)
+    marker.write_bytes(marker_bytes)
+    Path(str(marker) + ".sha256").write_text(sha256_bytes(marker_bytes) + "\n", encoding="utf-8")
+    return receipt
+
+
+def mark_pre_outcome_audit_failed(run_root: Path, execution_id: str) -> dict:
+    """Permanently retain a sealed run that failed custody before outcome access."""
+    marker = run_root / "PRE_OUTCOME_AUDIT_FAILED.json"
+    if marker.exists():
+        raise RuntimeError("AUDIT_FAILURE_MARKER_ALREADY_EXISTS")
+    block = run_root / "block"
+    if not (block / "SEALED_BLOCK_INDEX.json").is_file():
+        raise RuntimeError("SEALED_BLOCK_INDEX_MISSING")
+    if (block / "PRE_OUTCOME_AUDIT_PASS.json").exists():
+        raise RuntimeError("AUDIT_ALREADY_PASSED")
+    actual = len(list((block / "sealed_transcripts").glob("*.tar")))
+    inventory = {
+        path.relative_to(run_root).as_posix(): sha256_file(path)
+        for path in sorted(run_root.rglob("*"))
+        if path.is_file() and path != marker and path != Path(str(marker) + ".sha256")
+    }
+    receipt = {
+        "schema_version": "representation-lifting-pre-outcome-audit-failed/v1",
+        "execution_id": execution_id,
+        "execution_status": "PRE_OUTCOME_AUDIT_FAILED",
+        "admissibility": "NOT_ADMISSIBLE",
+        "failure_code": "SEALED_BRANCH_COUNT_MISMATCH",
+        "expected_sealed_branches": EXPECTED_SEALED_BRANCHES,
+        "actual_sealed_branches": actual,
+        "existing_provenance_preserved": True,
+        "preserved_file_sha256": inventory,
+        "outcome_content_opened": False,
+        "outcome_visibility": "NONE",
+        "recorded_at_utc": datetime.now(timezone.utc).isoformat(),
+    }
+    marker_bytes = canonical_json_bytes(receipt)
+    marker.write_bytes(marker_bytes)
+    Path(str(marker) + ".sha256").write_text(sha256_bytes(marker_bytes) + "\n", encoding="utf-8")
+    return receipt
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="provider-neutral execution launcher")
     parser.add_argument("--adapter", type=Path, default=DEFAULT_ADAPTER)
@@ -297,9 +460,21 @@ def main(argv=None) -> int:
     action.add_argument("--gate5", action="store_true")
     action.add_argument("--execute-block", action="store_true")
     action.add_argument("--audit-custody", action="store_true")
+    action.add_argument("--abort-manual-relay", action="store_true")
+    action.add_argument("--abort-inference-control", action="store_true")
+    action.add_argument("--mark-audit-failed", action="store_true")
     args = parser.parse_args(argv)
     run_root = args.run_root.resolve()
-    if args.gate5:
+    if args.mark_audit_failed:
+        mark_pre_outcome_audit_failed(run_root, args.execution_id)
+        print("PRE_OUTCOME_AUDIT_FAILED — NOT_ADMISSIBLE — OUTCOME VISIBILITY NONE")
+    elif args.abort_inference_control:
+        abort_inference_control(run_root, args.execution_id)
+        print("ABORTED_INFERENCE_CONTROL — NOT_ADMISSIBLE — OUTCOME VISIBILITY NONE")
+    elif args.abort_manual_relay:
+        abort_manual_relay(run_root, args.execution_id)
+        print("ABORTED_MANUAL_RELAY — NOT_ADMISSIBLE — OUTCOME VISIBILITY NONE")
+    elif args.gate5:
         gate5(args.adapter.resolve(), run_root, args.execution_id, args.model_id)
         print("GATE 5 ADAPTER CONTRACT PASS — PROVIDER NOT CONTACTED — OUTCOME VISIBILITY NONE")
     elif args.execute_block:

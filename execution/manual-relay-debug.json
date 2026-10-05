@@ -1,7 +1,7 @@
 {
   "schema_version": "representation-lifting-execution-adapter/v1",
-  "adapter_id": "codex-subscription-command-v1",
-  "kind": "command",
+  "adapter_id": "manual-relay-debug-v1",
+  "kind": "manual-relay",
   "trust_role": "TRANSPORT_ONLY_NOT_TRUST_ROOT",
   "credentials": "OPERATOR_SUPPLIED_OUTSIDE_REPOSITORY",
   "direct_api_required": false,
@@ -9,11 +9,8 @@
   "result_schema": "representation-lifting-model-result/v1",
   "system_role_handling": "EXPLICIT_DETERMINISTIC_FLATTENING",
   "message_history_handling": "EXPLICIT_DETERMINISTIC_FLATTENING",
-  "command": [
-    "python3",
-    "tools/codex_subscription_adapter.py"
-  ],
+  "debug_only": true,
   "supported_surfaces": [
-    "Codex CLI authenticated with an existing ChatGPT subscription"
+    "Explicit operator-courier debugging only; not an admissible production default"
   ]
 }

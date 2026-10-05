@@ -16,8 +16,8 @@ This repository hosts the formal preregistration, tooling, calibration fixtures,
 The execution trust path is provider-neutral. Claude, ChatGPT, a local model, or
 another surface may transport a particular model-under-test execution, but no
 provider is the audit authority or a project-wide availability gate. The stable
-adapter contract, immediate contract-only Gate 5, manual web relay path without
-personal API billing, and execution commands are documented in
+adapter contract, immediate contract-only Gate 5, automated subscription CLI
+path without direct API billing, and execution commands are documented in
 [EXECUTION_ARCHITECTURE.md](EXECUTION_ARCHITECTURE.md).
 
 Historical r8/r9, `INFRA_RECOVERY_01`, and A2/`EXECUTION_02` provenance is
@@ -157,5 +157,4 @@ python3 tests/test_build_pool.py        # Verifies deterministic pool builder, p
     - External public timestamp anchor rules formalized: the anchor must record the SHA-256 of the **entire `pool_bundle_manifest.json` file**, cryptographically binding source metadata, builder code, and all output file hashes.
     - Added unmocked real Lean integration test in `tests/test_build_pool.py` verifying real `lake env lean` execution on CI runner across major categories (`rfl`, `ring`, non-trivial, broken syntax).
     - `MANIFEST.sha256` updated to cover all 113 payload files with 0 failures on `sha256sum -c`.
-
 

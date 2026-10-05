@@ -243,6 +243,8 @@ class CommandAdapter(ExecutionAdapter):
 
     def transport(self, request: ModelRequest, turn_dir: Path, timeout_seconds: float) -> ModelResult:
         started = utc_now()
+        env = os.environ.copy()
+        env["EXECUTION_ADAPTER_TURN_DIR"] = str(turn_dir.resolve())
         completed = subprocess.run(
             self.config["command"],
             input=canonical_json_bytes(request.envelope()),
@@ -250,6 +252,7 @@ class CommandAdapter(ExecutionAdapter):
             stderr=subprocess.PIPE,
             timeout=timeout_seconds,
             check=False,
+            env=env,
         )
         stderr_path = turn_dir / "adapter.stderr"
         stderr_path.write_bytes(completed.stderr)
@@ -313,7 +316,18 @@ def verify_turn_custody(turn_dir: Path) -> dict:
     result = None
     if (turn_dir / "result.json").is_file():
         result = json.loads((turn_dir / "result.json").read_text(encoding="utf-8"))
+        request = json.loads((turn_dir / "request.json").read_text(encoding="utf-8")) \
+            if (turn_dir / "request.json").is_file() else {}
+        if (turn_dir / "request.json").is_file():
+            if result.get("request_sha256") != sha256_file(turn_dir / "request.json"):
+                errors.append("result request_sha256 mismatch")
+        if not result.get("started_at_utc") or not result.get("completed_at_utc"):
+            errors.append("transport timestamps missing")
         if result.get("delivery_status") == "DELIVERED":
+            if result.get("declared_model_id") != request.get("declared_model_id"):
+                errors.append("declared model identity mismatch")
+            if result.get("observed_model_id") != result.get("declared_model_id"):
+                errors.append("observed model identity mismatch")
             response = turn_dir / "response.txt"
             sidecar = turn_dir / "response.txt.sha256"
             if not response.is_file() or not sidecar.is_file():
@@ -322,4 +336,17 @@ def verify_turn_custody(turn_dir: Path) -> dict:
                 errors.append("hash mismatch: response.txt")
             elif result.get("response_sha256") != sha256_file(response):
                 errors.append("result response_sha256 mismatch")
+        evidence_files = result.get("transport_metadata", {}).get("evidence_files", {})
+        if not isinstance(evidence_files, dict):
+            errors.append("transport evidence_files must be an object")
+        else:
+            for name, expected in evidence_files.items():
+                if Path(name).name != name:
+                    errors.append(f"unsafe transport evidence filename: {name}")
+                    continue
+                evidence = turn_dir / name
+                if not evidence.is_file():
+                    errors.append(f"missing transport evidence: {name}")
+                elif sha256_file(evidence) != expected:
+                    errors.append(f"transport evidence hash mismatch: {name}")
     return {"custody_pass": not errors, "errors": errors, "delivery_status": (result or {}).get("delivery_status")}
